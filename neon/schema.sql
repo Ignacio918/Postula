@@ -1,6 +1,6 @@
 -- Ejecutar en el SQL Editor del proyecto Neon después de activar Auth y Data API.
 CREATE TABLE IF NOT EXISTS public.user_data (
-  user_id text PRIMARY KEY REFERENCES neon_auth."user"(id) ON DELETE CASCADE,
+  user_id uuid PRIMARY KEY REFERENCES neon_auth."user"(id) ON DELETE CASCADE,
   data jsonb NOT NULL DEFAULT '{}'::jsonb,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
