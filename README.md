@@ -6,8 +6,9 @@ Postula es una pequeña app web en español para reunir ofertas públicas, compa
 
 ## Probarla
 
-- **En Windows:** abrí `INICIAR.bat` o `index.html`.
-- **En Vercel o Netlify:** importá este repositorio como sitio estático. No requiere instalar dependencias ni compilar.
+- **Modo local:** abrí `INICIAR.bat` o `index.html` y elegí “Usar Postula en este dispositivo”. Los datos quedan en ese navegador.
+- **Modo con cuenta:** requiere Neon Auth + Data API. Seguí “Conectar Neon” más abajo; el login no queda activo hasta configurar esas URLs.
+- **En Vercel:** cada push a `main` publica automáticamente una versión. No requiere build.
 
 ## Primeros pasos
 
@@ -34,9 +35,7 @@ El porcentaje de encaje es orientativo, basado en coincidencias de texto. Revis�
 
 ## Privacidad
 
-Perfil, preferencias y seguimiento se guardan en `localStorage` del navegador. No hay servidor propio, analítica ni sincronización entre dispositivos. Cuando consultás fuentes en vivo, el navegador solicita los datos públicos a Greenhouse o Lever. En una computadora compartida, borrá los datos desde **Mi perfil → Borrar mis datos**.
-
-Al publicar el sitio, el código será público. La app no debería contener datos de perfil reales ni credenciales.
+En modo local, perfil, preferencias y seguimiento quedan en `localStorage`. Al configurar la cuenta Neon, el perfil, las ofertas guardadas y las postulaciones se sincronizan en Postgres con políticas RLS por usuario. La identidad y las sesiones las administra Neon Auth. No guardes aquí contraseñas de LinkedIn, Greenhouse, Lever ni otros portales. El código del repositorio es público; no agregues `.env` ni datos personales al repositorio.
 
 ## Publicar en Vercel o Netlify
 
@@ -46,7 +45,28 @@ El código ya está en GitHub. En cualquiera de los proveedores:
 2. Configurá el proyecto como estático, con directorio raíz `.`; dejá vacíos el comando de build y el directorio de salida.
 3. Publicá y abrí la URL temporal que te da el proveedor.
 
-El sitio usa solo HTML, CSS y JavaScript y tiene `index.html` en la raíz. No necesita un backend. Para que la búsqueda en vivo funcione, abrilo desde el dominio de Vercel/Netlify o desde un servidor local, no desde `file://`.
+El sitio usa HTML, CSS y JavaScript y tiene `index.html` en la raíz. Si vas a usar Neon, seguí los pasos y el build indicados más abajo para generar el `config.js` público con los endpoints de Neon. Para búsqueda en vivo, abrilo desde el dominio de Vercel/Netlify o desde un servidor local, no desde `file://`.
+
+## Conectar Neon (una vez)
+
+1. Entrá a [Neon Console](https://console.neon.tech/) y creá un proyecto en una región AWS.
+2. En el proyecto abrí **Auth → Enable Auth** y habilitá acceso por email/contraseña. Copiá el **Auth URL**.
+3. Activá **Data API** para la rama `main` y copiá su URL (el SDK usa la URL de Auth y Data API por separado).
+4. En **SQL Editor**, ejecutá el contenido de [`neon/schema.sql`](neon/schema.sql). Esta tabla usa RLS para que cada persona solo lea y escriba su propia fila.
+5. En **Vercel → Postula → Settings → Environment Variables**, agregá:
+
+   - `POSTULA_AUTH_URL` = Auth URL de Neon
+   - `POSTULA_DATA_API_URL` = URL REST de Data API, terminada en `/rest/v1`
+
+   Marcá **Production**, **Preview** y **Development** según dónde vayas a probarlo. El build genera `config.js` dentro de `dist/` a partir de esas variables; el archivo está ignorado por Git y solo contiene URLs públicas del proyecto.
+6. Configurá Vercel **Build Command** `npm run build` y **Output Directory** `dist`. Guardá y hacé **Redeploy**.
+7. Abrí el sitio. Tocá **Crear cuenta**, registrate con tu email y contraseña de Postula, y cargá el perfil. Al primer ingreso, Postula intentará importar el perfil local de ese navegador.
+
+El cliente solo recibe endpoints públicos de Neon, nunca una contraseña de base ni un token de administrador. La seguridad del perfil depende de las políticas RLS de [`neon/schema.sql`](neon/schema.sql); ejecutalas antes de cargar datos reales. La cuenta de Postula es distinta de tus credenciales de portales de empleo.
+
+### Protección del sitio público
+
+Vercel **Deployment Protection → All Deployments** puede restringir producción a miembros del equipo que tengan una cuenta Vercel. En Hobby puede variar la disponibilidad del alcance de producción. Esta barrera es aparte del login de Postula y no sirve para dar acceso fácil a otros usuarios. El login de Postula más RLS protege cada perfil aunque la página sea pública.
 
 ## Ejecutar un servidor local opcional
 
@@ -60,7 +80,7 @@ Después abrí <http://localhost:8000>. El servidor local evita restricciones qu
 
 ## Tecnología
 
-HTML, CSS y JavaScript nativos. Sin dependencias de compilación.
+HTML, CSS y JavaScript nativos; SDK oficial `@neon/neon-js` cargado como módulo ESM. La app estática requiere hosting HTTPS y acceso de red para Neon Auth/Data API.
 
 ## Licencia
 
