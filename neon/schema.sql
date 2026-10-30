@@ -28,4 +28,5 @@ CREATE POLICY "user_data_delete_own" ON public.user_data
   FOR DELETE TO authenticated
   USING (user_id::text = (SELECT auth.user_id()));
 
+GRANT USAGE ON SCHEMA public TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.user_data TO authenticated;
