@@ -55,10 +55,10 @@ El sitio usa HTML, CSS y JavaScript y tiene `index.html` en la raíz. Si vas a u
 4. En **SQL Editor**, ejecutá el contenido de [`neon/schema.sql`](neon/schema.sql). Esta tabla usa RLS para que cada persona solo lea y escriba su propia fila.
 5. En **Vercel → Postula → Settings → Environment Variables**, agregá:
 
-   - Preferentemente, usá las variables que agrega la integración: `NEON_AUTH_BASE_URL` y `NEON_DATA_API_URL`.
-   - También se aceptan `POSTULA_AUTH_URL` y `POSTULA_DATA_API_URL` si las querés cargar manualmente con los valores de Neon.
+   - `POSTULA_AUTH_URL` = Auth URL de Neon (la URL de Better Auth de la rama `main`).
+   - `POSTULA_DATA_API_URL` = API URL de Neon (terminada en `/rest/v1`).
 
-   Marcá **Production**, **Preview** y **Development** según dónde vayas a probarlo. El build genera `config.js` dentro de `dist/` a partir de esas variables; el archivo está ignorado por Git y solo contiene URLs públicas del proyecto.
+   Marcá **Production** para el sitio publicado y **Preview** si también vas a probar previews. La integración de Vercel puede agregar variables de Postgres y Auth con un prefijo personalizado; Postula necesita estas dos variables con los nombres exactos de arriba. El build genera `config.js` dentro de `dist/`; ese archivo está ignorado por Git y contiene los endpoints públicos del proyecto.
 6. Configurá Vercel **Build Command** `npm run build` y **Output Directory** `dist`. Guardá y hacé **Redeploy**. No publiques el directorio raíz si querés login: ahí no se genera el `config.js` con Neon.
 7. Abrí el sitio. Tocá **Crear cuenta**, registrate con tu email y contraseña de Postula, y cargá el perfil. Al primer ingreso, Postula intentará importar el perfil local de ese navegador.
 
