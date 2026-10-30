@@ -8,7 +8,7 @@ Postula es una pequeña app web en español para reunir ofertas públicas, compa
 
 - **Modo local:** abrí `INICIAR.bat` o `index.html` y elegí “Usar Postula en este dispositivo”. Los datos quedan en ese navegador.
 - **Modo con cuenta:** requiere Neon Auth + Data API. Seguí “Conectar Neon” más abajo; el login no queda activo hasta configurar esas URLs.
-- **En Vercel:** cada push a `main` publica automáticamente una versión. No requiere build.
+- **En Vercel:** cada push a `main` publica automáticamente una versión. Para usar Neon, configurá `npm run build` y `dist` como se explica abajo.
 
 ## Primeros pasos
 
@@ -42,8 +42,8 @@ En modo local, perfil, preferencias y seguimiento quedan en `localStorage`. Al c
 El código ya está en GitHub. En cualquiera de los proveedores:
 
 1. Elegí **Add New Project / Add a site → Import from GitHub** y autorizá el repositorio `Ignacio918/Postula`.
-2. Configurá el proyecto como estático, con directorio raíz `.`; dejá vacíos el comando de build y el directorio de salida.
-3. Publicá y abrí la URL temporal que te da el proveedor.
+2. Configurá el proyecto con directorio raíz `.`. Para la versión básica sin cuenta, podés dejar vacíos el comando de build y el directorio de salida.
+3. Publicá y abrí la URL temporal que te da el proveedor. Para conectar Neon, configurá las variables de entorno y el build antes de publicar, o redeplegá después de agregarlos.
 
 El sitio usa HTML, CSS y JavaScript y tiene `index.html` en la raíz. Si vas a usar Neon, seguí los pasos y el build indicados más abajo para generar el `config.js` público con los endpoints de Neon. Para búsqueda en vivo, abrilo desde el dominio de Vercel/Netlify o desde un servidor local, no desde `file://`.
 
@@ -59,7 +59,7 @@ El sitio usa HTML, CSS y JavaScript y tiene `index.html` en la raíz. Si vas a u
    - `POSTULA_DATA_API_URL` = URL REST de Data API, terminada en `/rest/v1`
 
    Marcá **Production**, **Preview** y **Development** según dónde vayas a probarlo. El build genera `config.js` dentro de `dist/` a partir de esas variables; el archivo está ignorado por Git y solo contiene URLs públicas del proyecto.
-6. Configurá Vercel **Build Command** `npm run build` y **Output Directory** `dist`. Guardá y hacé **Redeploy**.
+6. Configurá Vercel **Build Command** `npm run build` y **Output Directory** `dist`. Guardá y hacé **Redeploy**. No publiques el directorio raíz si querés login: ahí no se genera el `config.js` con Neon.
 7. Abrí el sitio. Tocá **Crear cuenta**, registrate con tu email y contraseña de Postula, y cargá el perfil. Al primer ingreso, Postula intentará importar el perfil local de ese navegador.
 
 El cliente solo recibe endpoints públicos de Neon, nunca una contraseña de base ni un token de administrador. La seguridad del perfil depende de las políticas RLS de [`neon/schema.sql`](neon/schema.sql); ejecutalas antes de cargar datos reales. La cuenta de Postula es distinta de tus credenciales de portales de empleo.
