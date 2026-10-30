@@ -36,7 +36,7 @@ El porcentaje de encaje es orientativo, basado en coincidencias de texto. Revis�
 
 Perfil, preferencias y seguimiento se guardan en `localStorage` del navegador. No hay servidor propio, analítica ni sincronización entre dispositivos. Cuando consultás fuentes en vivo, el navegador solicita los datos públicos a Greenhouse o Lever. En una computadora compartida, borrá los datos desde **Mi perfil → Borrar mis datos**.
 
-Al publicar en GitHub Pages, el código del sitio será público. La app no debería contener datos de perfil reales ni credenciales.
+Al publicar el sitio, el código será público. La app no debería contener datos de perfil reales ni credenciales.
 
 ## Publicar en Vercel o Netlify
 
