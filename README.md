@@ -7,7 +7,7 @@ Postula es una pequeña app web en español para reunir ofertas públicas, compa
 ## Probarla
 
 - **En Windows:** abrí `INICIAR.bat` o `index.html`.
-- **En GitHub Pages:** publicá la carpeta `postula` como raíz del repositorio o usá el workflow incluido. El sitio funciona como app estática y no necesita servidor.
+- **En Vercel o Netlify:** importá este repositorio como sitio estático. No requiere instalar dependencias ni compilar.
 
 ## Primeros pasos
 
@@ -38,14 +38,15 @@ Perfil, preferencias y seguimiento se guardan en `localStorage` del navegador. N
 
 Al publicar en GitHub Pages, el código del sitio será público. La app no debería contener datos de perfil reales ni credenciales.
 
-## Publicar en GitHub Pages
+## Publicar en Vercel o Netlify
 
-1. Creá un repositorio público nuevo en GitHub, por ejemplo `postula`.
-2. Copiá el contenido de esta carpeta al repositorio, incluida `.github/workflows/pages.yml`.
-3. En GitHub, abrí **Settings → Pages** y elegí **GitHub Actions** como origen.
-4. En **Actions**, esperá a que termine `Deploy Postula to GitHub Pages`. La URL aparecerá en **Settings → Pages**.
+El código ya está en GitHub. En cualquiera de los proveedores:
 
-El workflow despliega solo desde la rama `main`. Si publicás desde otra rama, editá `on.push.branches` en el YAML.
+1. Elegí **Add New Project / Add a site → Import from GitHub** y autorizá el repositorio `Ignacio918/Postula`.
+2. Configurá el proyecto como estático, con directorio raíz `.`; dejá vacíos el comando de build y el directorio de salida.
+3. Publicá y abrí la URL temporal que te da el proveedor.
+
+El sitio usa solo HTML, CSS y JavaScript y tiene `index.html` en la raíz. No necesita un backend. Para que la búsqueda en vivo funcione, abrilo desde el dominio de Vercel/Netlify o desde un servidor local, no desde `file://`.
 
 ## Ejecutar un servidor local opcional
 
