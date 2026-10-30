@@ -49,14 +49,14 @@ El sitio usa HTML, CSS y JavaScript y tiene `index.html` en la raíz. Si vas a u
 
 ## Conectar Neon (una vez)
 
-1. Entrá a [Neon Console](https://console.neon.tech/) y creá un proyecto en una región AWS.
-2. En el proyecto abrí **Auth → Enable Auth** y habilitá acceso por email/contraseña. Copiá el **Auth URL**.
-3. Activá **Data API** para la rama `main` y copiá su URL (el SDK usa la URL de Auth y Data API por separado).
+1. Creá la base Neon desde la integración de Vercel y vinculala al proyecto `postula`.
+2. En Neon abrí **Better Auth → Configure Auth**, agregá el dominio de producción a trusted domains y dejá habilitado el acceso por email/contraseña.
+3. En **Data API**, habilitala para `main`. La integración de Vercel agrega `NEON_AUTH_BASE_URL` y `NEON_DATA_API_URL` cuando los servicios están habilitados.
 4. En **SQL Editor**, ejecutá el contenido de [`neon/schema.sql`](neon/schema.sql). Esta tabla usa RLS para que cada persona solo lea y escriba su propia fila.
 5. En **Vercel → Postula → Settings → Environment Variables**, agregá:
 
-   - `POSTULA_AUTH_URL` = Auth URL de Neon
-   - `POSTULA_DATA_API_URL` = URL REST de Data API, terminada en `/rest/v1`
+   - Preferentemente, usá las variables que agrega la integración: `NEON_AUTH_BASE_URL` y `NEON_DATA_API_URL`.
+   - También se aceptan `POSTULA_AUTH_URL` y `POSTULA_DATA_API_URL` si las querés cargar manualmente con los valores de Neon.
 
    Marcá **Production**, **Preview** y **Development** según dónde vayas a probarlo. El build genera `config.js` dentro de `dist/` a partir de esas variables; el archivo está ignorado por Git y solo contiene URLs públicas del proyecto.
 6. Configurá Vercel **Build Command** `npm run build` y **Output Directory** `dist`. Guardá y hacé **Redeploy**. No publiques el directorio raíz si querés login: ahí no se genera el `config.js` con Neon.
