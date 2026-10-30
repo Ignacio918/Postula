@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#f4f3f1" />
+  <title>Postula — búsqueda de empleo con criterio</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="#inicio" aria-label="Postula, inicio"><span class="brand-mark"><i></i><i></i><i></i></span><span>postula</span><span class="brand-dot">.</span></a>
+    <div class="profile-switch"><span class="avatar">IG</span><span><b id="side-name">Tu perfil</b><small>Espacio personal</small></span><span class="chevron">⌄</span></div>
+    <span class="nav-caption">Búsqueda</span>
+    <nav class="navigation" aria-label="Principal">
+      <button class="nav-item active" data-view="ofertas"><span class="nav-glyph">⌕</span><span>Ofertas</span><span class="nav-count" id="nav-count">0</span></button>
+      <button class="nav-item" data-view="postulaciones"><span class="nav-glyph">▤</span><span>Postulaciones</span></button>
+      <button class="nav-item" data-view="perfil"><span class="nav-glyph">◎</span><span>Mi perfil</span></button>
+    </nav>
+    <div class="side-bottom"><div class="privacy-line"><span class="privacy-dot"></span> Datos guardados en este dispositivo</div><div class="user-mini"><div class="avatar avatar-small">IG</div><div><b id="side-name-bottom">Tu perfil</b><small>Plan personal</small></div><button id="settings-open" class="icon-button" title="Ajustes">···</button></div></div>
+  </aside>
+
+  <main class="main-content">
+    <header class="mobile-top"><button class="mobile-menu" id="mobile-menu" aria-label="Abrir menú">☰</button><a class="brand" href="#inicio"><span class="brand-mark"><i></i><i></i><i></i></span><span>postula</span><span class="brand-dot">.</span></a><span class="avatar avatar-small">IG</span></header>
+    <nav class="mobile-nav" id="mobile-nav" aria-label="Navegación móvil"><button data-view="ofertas">Ofertas</button><button data-view="postulaciones">Postulaciones</button><button data-view="perfil">Mi perfil</button></nav>
+    <div class="content-wrap">
+      <section class="screen active-screen" id="view-ofertas">
+        <div class="page-heading"><div><div class="eyebrow"><span class="live-dot"></span> TU BÚSQUEDA, EN MARCHA</div><h1>Ofertas con sentido.</h1><p class="heading-copy">Encontramos roles relevantes y preparamos cada candidatura con tu experiencia real.</p></div><button class="button button-primary" id="search-button"><span class="search-icon">⌕</span> Buscar ofertas <span class="button-shortcut">↵</span></button></div>
+        <div class="search-strip"><div class="query-field"><span class="search-icon">⌕</span><input id="query-input" placeholder="Puestos, separados por coma" aria-label="Puestos a buscar" /></div><span class="field-divider"></span><div class="query-field location-field"><span class="location-icon">⌖</span><input id="location-input" placeholder="Ubicación o modalidad" aria-label="Ubicación" /></div><button id="filter-button" class="filter-button">Filtros <span>⌄</span></button></div>
+        <div class="source-row"><div class="source-text"><span class="source-mark">◉</span> Fuentes públicas <span class="source-label">Greenhouse · Lever</span></div><span class="updated-label" id="updated-label">Ejemplos de interfaz</span></div>
+        <div class="filter-row"><div class="tabs" role="tablist"><button class="tab selected" data-filter="all">Todas <span id="count-all">0</span></button><button class="tab" data-filter="high">Mejor encaje <span id="count-high">0</span></button><button class="tab" data-filter="saved">Guardadas</button></div><div class="sort-control">Ordenar por <button id="sort-button">Mejor encaje <span>⌄</span></button></div></div>
+        <div class="results-layout"><section class="job-list" id="job-list" aria-label="Ofertas de empleo"></section><aside class="detail-panel" id="detail-panel"><div class="detail-empty"><span class="empty-glyph">↖</span><b>Elegí una oferta</b><p>Vas a ver el encaje, las habilidades relevantes y la candidatura preparada.</p></div></aside></div>
+        <footer class="page-footer"><span>Una buena postulación empieza con una buena elección.</span><span>Postula <b>·</b> Privado por diseño</span></footer>
+      </section>
+
+      <section class="screen" id="view-postulaciones">
+        <div class="page-heading"><div><div class="eyebrow">TU RECORRIDO</div><h1>Postulaciones.</h1><p class="heading-copy">Cada oportunidad y cada paso, en un mismo lugar.</p></div><button class="button button-primary" data-goto="ofertas">＋ Explorar ofertas</button></div>
+        <div class="pipeline-summary"><div><span>Preparadas</span><b id="stat-prepared">0</b></div><div><span>Enviadas</span><b id="stat-sent">0</b></div><div><span>Entrevistas</span><b id="stat-interview">0</b></div><div><span>Seguimientos pendientes</span><b id="stat-followup">0</b></div></div>
+        <div class="section-title-row"><h2>Tu actividad</h2><span id="activity-count">0 registros</span></div><div id="application-list" class="application-list"></div>
+      </section>
+
+      <section class="screen" id="view-perfil">
+        <div class="page-heading"><div><div class="eyebrow">LA FUENTE DE CADA CANDIDATURA</div><h1>Tu perfil.</h1><p class="heading-copy">Mantené tu experiencia al día. Las adaptaciones salen solo de lo que cargues acá.</p></div><button class="button button-primary" id="profile-save-top">Guardar cambios</button></div>
+        <div class="profile-layout"><div class="profile-form">
+          <div class="form-section"><div class="form-section-heading"><span class="step-number">01</span><div><h2>Datos de contacto</h2><p>Lo esencial para una candidatura completa.</p></div></div><div class="form-grid"><label>Nombre y apellido<input id="profile-name" placeholder="Ej. Ignacio García" /></label><label>Email<input id="profile-email" type="email" placeholder="nombre@email.com" /></label><label>Ubicación<input id="profile-location" placeholder="Buenos Aires, Argentina" /></label><label>LinkedIn o portfolio<input id="profile-link" placeholder="https://…" /></label></div></div>
+          <div class="form-section"><div class="form-section-heading"><span class="step-number">02</span><div><h2>Objetivo profesional</h2><p>Roles y condiciones para filtrar mejor.</p></div></div><div class="form-grid"><label class="span-two">Puestos de interés<input id="profile-roles" placeholder="Product Designer, UX/UI Designer" /></label><label>Modalidad preferida<select id="profile-mode"><option>Remoto</option><option>Híbrido</option><option>Presencial</option><option>Indistinto</option></select></label><label>Seniority<select id="profile-seniority"><option>Indistinto</option><option>Junior</option><option>Mid-level</option><option>Senior</option><option>Lead</option></select></label></div></div>
+          <div class="form-section"><div class="form-section-heading"><span class="step-number">03</span><div><h2>Experiencia y logros</h2><p>Usamos este contenido para adaptar el CV sin inventar.</p></div></div><label>Resumen profesional<textarea id="profile-summary" rows="4" placeholder="Contá qué hacés, en qué contextos trabajaste y qué te distingue…"></textarea></label><label>Experiencia, proyectos y resultados<textarea id="profile-experience" rows="7" placeholder="Una experiencia por bloque. Incluí empresa, rol, fechas, responsabilidades y resultados que puedas respaldar."></textarea></label><label>Habilidades<textarea id="profile-skills" rows="3" placeholder="Ej. investigación UX, Figma, diseño de interacción…"></textarea></label></div>
+          <div class="form-section"><div class="form-section-heading"><span class="step-number">04</span><div><h2>Fuentes para búsqueda en vivo</h2><p>Agregá los identificadores públicos de las páginas de empleo de las empresas que te interesan.</p></div></div><label>Greenhouse board token<input id="profile-greenhouse" placeholder="linear, notion, nombre-de-empresa" /><small class="form-help">Token visible en boards.greenhouse.io/…</small></label><label>Lever site name<input id="profile-lever" placeholder="linear, miro, nombre-de-empresa" /><small class="form-help">Site visible en jobs.lever.co/…</small></label><div class="browser-setup"><b>Completar formularios</b><p>Al iniciar una candidatura, Postula descargará el CV adaptado y abrirá el formulario publicado por la empresa. Iniciá sesión directamente allí. La app no necesita almacenar tus contraseñas.</p></div></div>
+          <div class="form-actions"><button class="button button-primary" id="profile-save">Guardar perfil</button><span id="save-message">Solo vos podés ver estos datos en este dispositivo.</span></div>
+        </div><aside class="profile-aside"><div class="aside-note"><div class="note-icon">✳</div><h3>Fiel a tu historia.</h3><p>La app puede reorganizar y destacar lo que ya contaste. No agrega empresas, herramientas, títulos ni logros que no estén en tu perfil.</p></div><div class="data-note"><b>Almacenamiento local</b><p>Tu información queda en este navegador. No la enviamos a ningún servidor.</p><button id="export-profile">Descargar copia de mis datos</button><button id="clear-profile">Borrar mis datos</button></div></aside></div>
+      </section>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<dialog id="filters-dialog"><form method="dialog" class="dialog-content"><div class="dialog-header"><div><div class="eyebrow">AJUSTÁ LA BÚSQUEDA</div><h2>Filtros</h2></div><button class="icon-button close-dialog" aria-label="Cerrar">×</button></div><label class="check-row"><input type="checkbox" id="remote-filter" checked /><span><b>Trabajo remoto</b><small>Incluye ofertas que permiten trabajar desde Argentina.</small></span></label><label class="check-row"><input type="checkbox" id="recent-filter" /><span><b>Publicadas recientemente</b><small>Prioriza puestos con actividad reciente.</small></span></label><label>Tipo de rol<select id="role-filter"><option value="all">Todos</option><option value="product">Product design</option><option value="ux">UX/UI design</option><option value="research">UX research</option></select></label><div class="dialog-actions"><button class="button button-quiet close-dialog">Cancelar</button><button class="button button-primary close-dialog">Aplicar filtros</button></div></form></dialog>
+<dialog id="apply-dialog"><form method="dialog" class="dialog-content apply-dialog-content"><div class="dialog-header"><div><div class="eyebrow">POSTULACIÓN ASISTIDA</div><h2>Prepará y abrí la candidatura.</h2></div><button class="icon-button close-dialog" aria-label="Cerrar">×</button></div><div id="apply-content"></div><div class="dialog-actions" id="apply-actions"></div></form></dialog>
+<script src="app.js"></script>
+</body>
+</html>
