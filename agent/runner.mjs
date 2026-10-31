@@ -241,19 +241,17 @@ function scoreJob(job, p) {
 
 function inScope(job, p) {
   const text = `${job.role} ${job.location} ${job.description}`.toLowerCase();
-  const titleWords = new Set(roleTerms(job.role));
-  const targetRoles = String(p.roles || '').split(/[,;\n]/).map((role) => roleTerms(role)).filter((role) => role.length);
-  const roleFamilies = [
-    { targets: /designer|design engineer|ux|ui|product design/, include: /designer|design engineer|ux|ui|product design/, exclude: /graphic design|motion|interior|fashion/ },
-    { targets: /project manager|program manager|delivery manager/, include: /project manager|program manager|delivery manager|technical project manager/ },
-  ];
-  const wantedFamilies = roleFamilies.filter((family) => family.targets.test(String(p.roles || '')));
-  const title = String(job.role || '').toLowerCase();
+  const normalizeRole = (value) => value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\b(senior|sr|junior|jr|staff|principal|lead|associate|mid-level|midlevel)\b/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+  const targetRoles = String(p.roles || '').split(/[,;\n]/).map(normalizeRole).filter(Boolean);
+  const title = normalizeRole(String(job.role || ''));
   const targetsSoftwareEngineering = /software engineer|back.?end|front.?end|full.?stack|software developer/i.test(String(p.roles || ''));
   if (!targetsSoftwareEngineering && /back.?end|front.?end|full.?stack|software engineer|software developer|devops|data engineer/i.test(title)) return false;
-  const hasTitleMatch = targetRoles.some((role) => role.filter((word) => titleWords.has(word)).length / role.length >= 0.5);
-  const hasFamilyMatch = wantedFamilies.some((family) => family.include.test(title) && !family.exclude?.test(title));
-  if (targetRoles.length && !hasTitleMatch && !hasFamilyMatch) return false;
+  const hasTitleMatch = targetRoles.some((role) => title.includes(role));
+  const seeksDesign = targetRoles.some((role) => /designer|design engineer|product design|ux|ui/.test(role));
+  const seeksProjectManagement = targetRoles.some((role) => /project manager|program manager/.test(role));
+  const hasDesignMatch = seeksDesign && /product designer|product design|design engineer|ux\s*ui designer|ux designer|ui designer/.test(title);
+  const hasProjectManagementMatch = seeksProjectManagement && /project manager|program manager/.test(title);
+  if (targetRoles.length && !hasTitleMatch && !hasDesignMatch && !hasProjectManagementMatch) return false;
   const mode = String(p.mode || 'Indistinto').toLowerCase();
   if (mode.includes('remoto') && !/remote|remoto|anywhere|worldwide|distributed|latam|latin america|americas|global/i.test(text)) return false;
   if (mode.includes('remoto') && /north america only|u\.?s\.? only|united states only|canada only|europe only|uk only|must be based in (?:the )?(?:us|united states|north america)/i.test(text) && /argentina|buenos aires|latam|latin america/i.test(p.location || '')) return false;
