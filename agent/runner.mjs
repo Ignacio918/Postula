@@ -17,7 +17,6 @@ const profile = payload.profile || {};
 const settings = payload.settings || payload;
 const minimumMatch = Number(settings.minimumMatch || payload.autoThreshold || 80);
 const dailyLimit = Math.max(1, Math.min(20, Number(settings.dailyLimit || payload.dailyLimit || 5)));
-const autoSubmit = settings.autoSubmit === true;
 const stateFile = path.join(workDir, 'state.json');
 const resultFile = path.join(workDir, 'results.json');
 const state = await readJson(stateFile, { applied: [], attempted: [], date: '', submittedToday: 0, attemptedToday: 0 });
@@ -98,8 +97,7 @@ while (keepRunning) {
           result.status = 'needs_attention';
           result.reason = 'No pude identificar un único botón de envío seguro.';
         } else {
-          if (autoSubmit) console.log(`Formulario completo y datos respaldados por el perfil; envío automático activado para ${job.company} · ${job.role}.`);
-          const approved = autoSubmit || await confirmSubmission(job);
+          const approved = await confirmSubmission(job);
           if (!approved) {
             result.status = 'needs_attention';
             result.reason = 'Formulario completo; falta confirmación manual para enviar la postulación.';
@@ -306,6 +304,7 @@ function inScope(job, p) {
   const targetRoles = String(p.roles || '').split(/[,;\n]/).map(normalizeRole).filter(Boolean);
   const title = normalizeRole(String(job.role || ''));
   const targetsSoftwareEngineering = /software engineer|back.?end|front.?end|full.?stack|software developer/i.test(String(p.roles || ''));
+  if (/expression of interest|talent pool|future opportunities|general interest|open application|mechanical design|cad engineer|manufacturing engineer|civil engineer|electrical engineer|construction engineer/.test(title)) return false;
   if (!targetsSoftwareEngineering && /back.?end|front.?end|full.?stack|software engineer|software developer|devops|data engineer/i.test(title)) return false;
   const hasTitleMatch = targetRoles.some((role) => title.includes(role));
   const seeksDesign = targetRoles.some((role) => /designer|design engineer|product design|ux|ui/.test(role));
@@ -380,10 +379,22 @@ async function openApplicationForm(page) {
   };
   let form = await findForm();
   if (form) return form;
-  const apply = page.getByRole('link', { name: /apply|aplicar|postular/i }).or(page.getByRole('button', { name: /apply|aplicar|postular/i })).first();
-  if (await apply.count()) {
-    await apply.click({ timeout: 8000 });
+  const applyLink = page.getByRole('link', { name: /apply|aplicar|postular/i }).first();
+  if (await applyLink.count()) {
+    const href = await applyLink.getAttribute('href').catch(() => null);
+    if (href) {
+      const destination = new URL(href, page.url()).href;
+      if (destination !== page.url()) await page.goto(destination, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    } else {
+      await applyLink.evaluate((element) => element.click()).catch(() => {});
+    }
     await page.waitForTimeout(1200);
+  } else {
+    const applyButton = page.getByRole('button', { name: /apply|aplicar|postular/i }).first();
+    if (await applyButton.count()) {
+      await applyButton.click({ timeout: 8000 }).catch(() => {});
+      await page.waitForTimeout(1200);
+    }
   }
   form = await findForm();
   if (!form) throw new Error('No encontré un formulario de candidatura reconocible en este portal.');
