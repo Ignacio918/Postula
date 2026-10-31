@@ -333,7 +333,11 @@ function Show-ProfileDialog {
   $email = Add-ProfileField $form 'Email' ([string]$p.email)
   $roles = Add-ProfileField $form 'Puestos (separados por coma)' ([string]$p.roles)
   $location = Add-ProfileField $form 'Ubicación' ($(if ($p.location) { [string]$p.location } else { 'Buenos Aires, Argentina' }))
-  $mode = Add-ProfileField $form 'Modalidad' ($(if ($p.mode) { [string]$p.mode } else { 'Remoto' }))
+  $modeCaption = New-Object System.Windows.Controls.TextBlock; $modeCaption.Text = 'Modalidad'; $modeCaption.FontSize = 12; $modeCaption.Foreground = $script:MutedBrush; $modeCaption.Margin = '0,10,0,5'; [void]$form.Children.Add($modeCaption)
+  $mode = New-Object System.Windows.Controls.ComboBox; $mode.Height = 38; $mode.FontSize = 13; $mode.Padding = '8,5'; [void]$mode.Items.Add('Remoto'); [void]$mode.Items.Add('Híbrido'); [void]$mode.Items.Add('Presencial'); [void]$mode.Items.Add('Indistinto (todos)')
+  $savedMode = ([string]$p.mode).ToLowerInvariant()
+  if ($savedMode -match 'h[ií]brido|hybrid') { $mode.SelectedIndex = 1 } elseif ($savedMode -match 'presencial|onsite|on-site') { $mode.SelectedIndex = 2 } elseif ($savedMode -match 'indistinto|todos|all') { $mode.SelectedIndex = 3 } else { $mode.SelectedIndex = 0 }
+  [void]$form.Children.Add($mode)
   $regionCaption = New-Object System.Windows.Controls.TextBlock; $regionCaption.Text = 'Prioridad geográfica'; $regionCaption.FontSize = 12; $regionCaption.Foreground = $script:MutedBrush; $regionCaption.Margin = '0,10,0,5'; [void]$form.Children.Add($regionCaption)
   $region = New-Object System.Windows.Controls.ComboBox; $region.Height = 38; $region.FontSize = 13; $region.Padding = '8,5'; [void]$region.Items.Add('Argentina → LATAM → remoto global'); [void]$region.Items.Add('Solo Argentina y LATAM'); [void]$region.Items.Add('Sin prioridad geográfica')
   $region.SelectedIndex = switch ([string]$p.regionPreference) { 'regional-only' { 1 } 'balanced' { 2 } default { 0 } }; [void]$form.Children.Add($region)
@@ -376,7 +380,7 @@ function Show-ProfileDialog {
       if (-not [int]::TryParse($interval.Text, [ref]$intervalValue) -or $intervalValue -lt 1 -or $intervalValue -gt 1440) { throw 'La frecuencia debe ser un número de 1 a 1440 minutos.' }
       $profileData = @{
         name = $name.Text.Trim(); email = $email.Text.Trim(); phone = [string]$p.phone; location = $location.Text.Trim();
-        roles = $roles.Text.Trim(); mode = $mode.Text.Trim(); resume = $resume.Text.Trim(); summary = $summary.Text.Trim();
+        roles = $roles.Text.Trim(); mode = [string]$mode.SelectedItem; resume = $resume.Text.Trim(); summary = $summary.Text.Trim();
         experience = [string]$p.experience; skills = $skills.Text.Trim(); link = [string]$p.link;
         salaryExpectation = [string]$p.salaryExpectation; workAuthorization = [string]$p.workAuthorization;
         regionPreference = @('regional-first', 'regional-only', 'balanced')[[int]$region.SelectedIndex];

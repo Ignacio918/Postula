@@ -864,17 +864,22 @@ function inScope(job, p) {
   const hasDesignMatch = seeksDesign && /product designer|product design|design engineer|ux\s*ui designer|ux designer|ui designer/.test(title);
   const hasProjectManagementMatch = seeksProjectManagement && /project manager|program manager/.test(title);
   if (targetRoles.length && !hasTitleMatch && !hasDesignMatch && !hasProjectManagementMatch) return false;
-  const mode = String(p.mode || 'Indistinto').toLowerCase();
+  const mode = String(p.mode || 'Remoto').toLowerCase();
   const workEvidence = `${job.location || ''} ${job.workplaceType || ''} ${job.type || ''} ${job.remoteStatus || ''}`;
-  const remoteEvidence = `${workEvidence} ${(job.tags || []).join(' ')}`;
+  const remoteEvidence = `${workEvidence} ${(job.tags || []).join(' ')} ${job.description || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const hybridEvidence = /\bhybrid\b|\bh[ií]brido\b|2\s*[-–]?\s*3 days? (?:in|at) (?:the )?office|part[- ]time in office/.test(remoteEvidence);
+  const onsiteEvidence = /\bon[\s-]?site\b|\bin[\s-]?office\b|office[- ]based|presencial/.test(remoteEvidence);
   const remoteMode = mode.includes('remoto');
-  if (remoteMode && /\bhybrid\b|h[ií]brido/i.test(workEvidence)) return false;
+  const hybridMode = mode.includes('híbrido') || mode.includes('hibrido') || mode.includes('hybrid');
+  const onsiteMode = mode.includes('presencial') || mode.includes('onsite') || mode.includes('on-site');
+  const allModes = mode.includes('indistinto') || mode.includes('todos') || mode.includes('all');
+  if (remoteMode && (hybridEvidence || onsiteEvidence)) return false;
   if (remoteMode && job.remote !== true && !/remote|remoto|anywhere|worldwide|distributed|work from home|telecommute/i.test(remoteEvidence)) return false;
   if (!locationFitsArgentina(job, p)) return false;
   if (p.regionPreference === 'regional-only' && regionPriority(job, p) > 1) return false;
-  if (mode.includes('híbrido') && !/hybrid|h[ií]brid/i.test(text)) return false;
-  if (mode.includes('presencial')) {
-    if (/remote|remoto|anywhere|worldwide/i.test(text)) return false;
+  if (!allModes && hybridMode && !hybridEvidence) return false;
+  if (!allModes && onsiteMode) {
+    if (!onsiteEvidence) return false;
     const place = String(p.location || '').toLowerCase().split(/[,-]/).map((part) => part.trim()).filter(Boolean);
     if (place.length && !place.some((part) => text.includes(part))) return false;
   }
