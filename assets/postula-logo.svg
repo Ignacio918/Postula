@@ -2,8 +2,8 @@
   <title id="title">Postula</title>
   <g fill="none" stroke-linecap="round" stroke-linejoin="round">
     <path d="M7 49V14h18a13 13 0 1 1 0 26h-8" stroke="#20211F" stroke-width="7"/>
-    <path d="m29 48 15-15m0 0v10m0-10H34" stroke="#648A69" stroke-width="4.5"/>
   </g>
+  <circle cx="31" cy="45" r="3.5" fill="#648A69"/>
   <text x="69" y="41" fill="#20211F" font-family="Manrope, 'DM Sans', 'Segoe UI', sans-serif" font-size="36" font-weight="700" letter-spacing="-1.8">postula</text>
   <circle cx="190" cy="36" r="4.5" fill="#648A69"/>
 </svg>

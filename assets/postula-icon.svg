@@ -2,5 +2,5 @@
   <title id="title">Postula</title>
   <rect width="256" height="256" rx="58" fill="#F4F3F1"/>
   <path d="M72 194V62h68a49 49 0 1 1 0 98h-29" fill="none" stroke="#20211F" stroke-width="23" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="m126 190 53-53m0 0v34m0-34h-34" fill="none" stroke="#648A69" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="150" cy="168" r="11" fill="#648A69"/>
 </svg>
