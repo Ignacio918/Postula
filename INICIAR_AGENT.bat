@@ -10,7 +10,8 @@ if errorlevel 1 (
 )
 
 set "CONFIG=%~1"
-if not defined CONFIG set /p "CONFIG=Arrastra aca postula-agent-config.json y presiona Enter: "
+if not defined CONFIG if exist ".postula-agent\postula-agent-config.json" set "CONFIG=.postula-agent\postula-agent-config.json"
+if not defined CONFIG set /p "CONFIG=Pegá la ruta del postula-agent-config.json descargado: "
 set "CONFIG=%CONFIG:"=%"
 if not exist "%CONFIG%" (
   echo No encuentro el archivo de configuracion: %CONFIG%

@@ -30,7 +30,7 @@ const isBatch = Array.isArray(payload.jobs) && payload.jobs.length > 0;
 const intervalMinutes = Math.max(15, Math.min(1440, Number(settings.intervalMinutes || 60)));
 const stop = new Set('the and for with from that this your you our are can will have has into about role work team experience design designer product user users their they them as an a to of in on or is be we it by at across using use years strong ability skills what who all not'.split(' '));
 
-if (!profile.name || !profile.email || !profile.roles || !(profile.resume || profile.experience) || !(profile.greenhouse || profile.lever)) {
+if (!profile.name || !profile.email || !profile.roles || !(profile.resume || profile.experience)) {
   console.error('Faltan nombre, email, puestos objetivo o contenido de CV en la configuración de Postula.');
   process.exit(2);
 }
@@ -75,6 +75,10 @@ while (keepRunning) {
     const cvPath = await createResumePdf(pdfBrowser, job, profile, workDir);
     await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForTimeout(1500);
+    const applicationUrl = await findApplicationUrl(page);
+    if (applicationUrl && applicationUrl !== page.url()) await page.goto(applicationUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    result.url = page.url();
+    await page.waitForTimeout(1200);
     if (await hasBlocker(page)) {
       result.status = 'needs_attention';
       result.reason = 'El sitio muestra un CAPTCHA, una verificación o un control que requiere intervención.';
@@ -174,7 +178,9 @@ async function confirmSubmission(job) {
 async function discoverJobs(p) {
   const boards = String(p.greenhouse || '').split(/[\s,]+/).filter(Boolean);
   const sites = String(p.lever || '').split(/[\s,]+/).filter(Boolean);
-  const lists = await Promise.all([
+  const lists = await Promise.allSettled([
+    discoverRemotive(),
+    discoverJobicy(),
     ...boards.map(async (board) => {
       const response = await fetch(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs?content=true`);
       if (!response.ok) throw new Error(`Greenhouse ${board}: HTTP ${response.status}`);
@@ -188,7 +194,27 @@ async function discoverJobs(p) {
       return json.map((job) => ({ id: `lv-${job.id}`, company: label(site), role: job.text, url: job.applyUrl || job.hostedUrl, location: job.categories?.location || '', description: job.descriptionPlain || stripHtml(job.description || ''), source: 'Lever' }));
     }),
   ]);
-  return lists.flat().filter((job) => job.url);
+  const jobs = [];
+  for (const result of lists) {
+    if (result.status === 'fulfilled') jobs.push(...result.value);
+    else console.warn(`Fuente no disponible: ${result.reason?.message || result.reason}`);
+  }
+  if (!jobs.length) throw new Error('Ninguna fuente respondió.');
+  return [...new Map(jobs.filter((job) => job.url).map((job) => [job.id, job])).values()];
+}
+
+async function discoverRemotive() {
+  const response = await fetch('https://remotive.com/api/remote-jobs', { headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error(`Remotive: HTTP ${response.status}`);
+  const json = await response.json();
+  return (json.jobs || []).map((job) => ({ id: `remotive-${job.id}`, company: job.company_name || 'Empresa', role: job.title, url: job.url, location: job.candidate_required_location || 'Remoto', description: stripHtml(job.description || ''), source: 'Remotive' }));
+}
+
+async function discoverJobicy() {
+  const response = await fetch('https://jobicy.com/api/jobs?count=200&geo=anywhere', { headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error(`Jobicy: HTTP ${response.status}`);
+  const json = await response.json();
+  return (json.jobs || []).map((job) => ({ id: `jobicy-${job.id}`, company: job.companyName || 'Empresa', role: job.jobTitle, url: job.url, location: job.jobGeo || 'Remoto', description: stripHtml(job.jobDescription || job.jobExcerpt || ''), source: 'Jobicy' }));
 }
 
 function label(value) { return value.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()); }
@@ -211,7 +237,15 @@ function inScope(job, p) {
   const text = `${job.role} ${job.location} ${job.description}`.toLowerCase();
   const titleWords = new Set(roleTerms(job.role));
   const targetRoles = String(p.roles || '').split(/[,;\n]/).map((role) => roleTerms(role)).filter((role) => role.length);
-  if (targetRoles.length && !targetRoles.some((role) => role.filter((word) => titleWords.has(word)).length / role.length >= 0.5)) return false;
+  const roleFamilies = [
+    { targets: /designer|design engineer|ux|ui|product design/, include: /designer|design engineer|ux|ui|product design/, exclude: /graphic design|motion|interior|fashion/ },
+    { targets: /project manager|program manager|delivery manager/, include: /project manager|program manager|delivery manager|technical project manager/ },
+  ];
+  const wantedFamilies = roleFamilies.filter((family) => family.targets.test(String(p.roles || '')));
+  const title = String(job.role || '').toLowerCase();
+  const hasTitleMatch = targetRoles.some((role) => role.filter((word) => titleWords.has(word)).length / role.length >= 0.5);
+  const hasFamilyMatch = wantedFamilies.some((family) => family.include.test(title) && !family.exclude?.test(title));
+  if (targetRoles.length && !hasTitleMatch && !hasFamilyMatch) return false;
   const mode = String(p.mode || 'Indistinto').toLowerCase();
   if (mode.includes('remoto') && !/remote|remoto|anywhere|worldwide|distributed|latam|latin america|americas|global/i.test(text)) return false;
   if (mode.includes('remoto') && /north america only|u\.?s\.? only|united states only|canada only|europe only|uk only|must be based in (?:the )?(?:us|united states|north america)/i.test(text) && /argentina|buenos aires|latam|latin america/i.test(p.location || '')) return false;
@@ -248,6 +282,20 @@ function htmlEscape(value = '') { return String(value).replace(/[&<>"']/g, (c) =
 
 async function hasBlocker(page) {
   return /captcha|verify you are human|checking your browser|security verification|robot check/i.test(await page.locator('body').innerText({ timeout: 5000 }).catch(() => ''));
+}
+async function findApplicationUrl(page) {
+  const link = page.getByRole('link', { name: /apply|apply now|aplicar|postular|apply for this job/i }).first();
+  if (await link.count().catch(() => 0)) {
+    const href = await link.getAttribute('href').catch(() => null);
+    if (href) return new URL(href, page.url()).href;
+  }
+  const button = page.getByRole('button', { name: /apply|apply now|aplicar|postular|apply for this job/i }).first();
+  if (await button.count().catch(() => 0)) {
+    await button.click({ timeout: 6000 }).catch(() => {});
+    await page.waitForTimeout(900);
+    return page.url();
+  }
+  return null;
 }
 async function hasConfirmation(page) {
   return /application (was )?submitted|thank you for applying|thanks for applying|application received|candidatura enviada|gracias por postular|recibimos tu postulación/i.test(await page.locator('body').innerText({ timeout: 5000 }).catch(() => ''));

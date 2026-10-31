@@ -6,12 +6,12 @@ Postula busca vacantes, las compara con tu CV, prepara una versión orientada al
 
 1. Iniciá sesión en [Postula](https://postula-iota.vercel.app/) y abrí **Mi perfil**.
 2. Importá tu CV en PDF o TXT. La extracción del PDF se hace en el navegador; revisá los datos de contacto y guardá el perfil.
-3. Completá los puestos que buscás y agregá los tokens públicos de tus boards Greenhouse o sites Lever.
+3. Completá los puestos que buscás. La búsqueda incluye Remotive y Jobicy; Greenhouse y Lever son fuentes adicionales opcionales.
 4. Definí modalidad, encaje mínimo y máximo diario. Guardá los cambios.
 5. Elegí **Descargar configuración del agente**. El JSON incluye CV y datos personales: queda en tu computadora, no lo subas al repo ni lo compartas.
 6. Instalá el agente local siguiendo la sección siguiente.
 
-La búsqueda en la app también consulta esas fuentes al tocar **Buscar ofertas**. Las tarjetas **DEMO** son ejemplos, nunca vacantes actuales. El encaje usa coincidencias de términos y puestos objetivo; es una señal orientativa, no una evaluación de contratación.
+La búsqueda en la app también consulta esas fuentes al tocar **Buscar ofertas**. Remotive debe consultarse como máximo cuatro veces al día y sus ofertas se muestran atribuidas a la fuente, con enlace al aviso original. Jobicy ofrece puestos publicados en los últimos siete días. Las tarjetas **DEMO** son ejemplos, nunca vacantes actuales. El encaje usa coincidencias de términos y puestos objetivo; es una señal orientativa, no una evaluación de contratación.
 
 ## Instalar y ejecutar el agente local
 
@@ -23,7 +23,7 @@ npx playwright install chromium
 npm run agent -- "C:\Users\TU_USUARIO\Downloads\postula-agent-config.json"
 ```
 
-En Windows también podés abrir `INICIAR_AGENT.bat` y pegar o arrastrar el JSON descargado cuando lo pida.
+En Windows, guardá el JSON descargado como `.postula-agent\postula-agent-config.json` dentro del repo y abrí `INICIAR_AGENT.bat`. En el primer uso el agente te preguntará para instalar Chromium. En futuras ejecuciones solo tenés que abrir el `.bat`.
 
 El agente abre Chromium visible y consulta las fuentes cada hora mientras la terminal siga abierta. En el primer uso, el navegador crea `.postula-agent/browser-profile`; iniciá sesión allí directamente en los portales donde tengas cuenta. Las contraseñas no se guardan en Postula ni en el JSON; las cookies quedan en ese perfil local del navegador.
 
@@ -31,12 +31,12 @@ El agente aplica el límite diario y el encaje mínimo configurados. Genera un P
 
 ## Límites del agente
 
-- La primera versión consulta boards públicos de Greenhouse y Lever que agregues al perfil; no rastrea toda la web.
+- La búsqueda consulta los feeds públicos de Remotive y Jobicy, además de los boards Greenhouse y Lever que agregues. No existe un feed único que cubra literalmente toda la web; LinkedIn, Indeed, portales privados y sitios sin API pública pueden no aparecer. Remotive indica que sus datos no deben enviarse a otros sitios de empleo y recomienda como máximo cuatro consultas diarias.
 - La adaptación actual destaca el puesto y las competencias encontradas en tu CV, y prioriza bloques de experiencia. Conserva el texto de origen; no inventa datos ni hace una reescritura generativa con IA.
 - Antes de enviar cada candidatura, el agente requiere confirmación manual con `ENVIAR` en la terminal.
 - Si un formulario pide un dato ausente, una declaración legal, un CAPTCHA, una verificación o un paso que el agente no reconoce, lo deja pendiente y no adivina la respuesta ni evade el control.
 - Los formularios cambian por empresa. Revisá el resultado local, especialmente los estados `submitted_unconfirmed` y `needs_attention`.
-- El agente funciona en tu computadora, no como tarea de fondo de Vercel. Dejá abierta la terminal y el navegador para que siga buscando.
+- El agente funciona en tu computadora, no como tarea de fondo de Vercel. Dejá abierta la terminal y el navegador para que siga buscando cada hora. Para que arranque con Windows, creá una tarea del Programador de tareas **Al iniciar sesión**, con `INICIAR_AGENT.bat` como acción; necesita que tu sesión esté iniciada y la PC encendida.
 
 ## Desarrollo y despliegue web
 
