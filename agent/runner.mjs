@@ -123,8 +123,14 @@ while (keepRunning) {
       }
     }
   } catch (error) {
-    result.status = 'error';
-    result.reason = String(error?.message || error).slice(0, 400);
+    const message = String(error?.message || error);
+    if (/No encontré un formulario de candidatura reconocible/i.test(message)) {
+      result.status = 'needs_attention';
+      result.reason = 'El aviso no mostró un formulario que el agente pueda completar. Dejé la página abierta para que revises el enlace de postulación.';
+    } else {
+      result.status = 'error';
+      result.reason = message.slice(0, 400);
+    }
   }
   results.push(result);
   cycleResults.push(result);
@@ -243,6 +249,8 @@ function inScope(job, p) {
   ];
   const wantedFamilies = roleFamilies.filter((family) => family.targets.test(String(p.roles || '')));
   const title = String(job.role || '').toLowerCase();
+  const targetsSoftwareEngineering = /software engineer|back.?end|front.?end|full.?stack|software developer/i.test(String(p.roles || ''));
+  if (!targetsSoftwareEngineering && /back.?end|front.?end|full.?stack|software engineer|software developer|devops|data engineer/i.test(title)) return false;
   const hasTitleMatch = targetRoles.some((role) => role.filter((word) => titleWords.has(word)).length / role.length >= 0.5);
   const hasFamilyMatch = wantedFamilies.some((family) => family.include.test(title) && !family.exclude?.test(title));
   if (targetRoles.length && !hasTitleMatch && !hasFamilyMatch) return false;
