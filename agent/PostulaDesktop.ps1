@@ -127,7 +127,8 @@ $xamlText = @'
         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
           <Image x:Name="BrandIcon" Width="29" Height="29" Margin="0,0,9,0"/>
-          <TextBlock Text="postula." FontSize="20" FontWeight="Bold" Foreground="#171715" VerticalAlignment="Center"/>
+          <TextBlock Text="postula" FontSize="20" FontWeight="Bold" Foreground="#171715" VerticalAlignment="Center"/>
+          <TextBlock Text="." FontSize="20" FontWeight="Bold" Foreground="#648A69" Margin="-6,0,0,0" VerticalAlignment="Center"/>
           <Border Width="1" Height="22" Background="#DCDAD6" Margin="14,0"/>
           <TextBlock Text="AGENTE DE ESCRITORIO" FontSize="11" Foreground="#5F5D59" VerticalAlignment="Center"/>
         </StackPanel>

@@ -8,3 +8,5 @@
 @media(max-width:620px){.auth-gate{padding:16px}.auth-card{padding:25px 22px 22px}.auth-brand{margin-bottom:34px}.auth-card h1{font-size:27px}}
 
 .heading-actions{display:flex;align-items:center;gap:8px;flex:none}.heading-actions .button{white-space:nowrap;padding:0 11px;height:36px;font-size:10px}.browser-setup .button{margin-top:10px}@media(max-width:620px){.heading-actions{gap:5px}.heading-actions .button{height:33px;padding:0 8px;font-size:9px}.heading-actions #search-button{font-size:0;gap:0}.heading-actions #search-button .search-icon{font-size:17px}.heading-actions #search-button .button-shortcut{display:none}}
+
+.brand-logo{display:block;width:148px;height:36px;object-fit:contain;object-position:left center;flex:none}.auth-brand .brand-logo{width:153px}.mobile-top .brand-logo{width:132px;height:32px}
