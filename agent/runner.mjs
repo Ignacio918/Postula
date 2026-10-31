@@ -19,10 +19,11 @@ const minimumMatch = Number(settings.minimumMatch || payload.autoThreshold || 80
 const dailyLimit = Math.max(1, Math.min(20, Number(settings.dailyLimit || payload.dailyLimit || 5)));
 const stateFile = path.join(workDir, 'state.json');
 const resultFile = path.join(workDir, 'results.json');
-const state = await readJson(stateFile, { applied: [], attempted: [], date: '', submittedToday: 0, attemptedToday: 0 });
+const state = await readJson(stateFile, { applied: [], attempted: [], discovered: [], date: '', submittedToday: 0, attemptedToday: 0 });
 state.applied ||= [];
 state.attempted ||= [];
 state.pending ||= [];
+state.discovered ||= [];
 for (const application of payload.applications || []) {
   if (application.jobId && ['Enviada', 'Entrevista', 'Seguimiento'].includes(application.status) && !state.applied.includes(application.jobId)) state.applied.push(application.jobId);
 }
@@ -55,27 +56,34 @@ while (keepRunning) {
     await wait(intervalMinutes);
     continue;
   }
+  const previousResults = await readJson(resultFile, { results: [] });
+  const results = previousResults.results || [];
+  for (const prior of results) {
+    if (!prior.jobId) continue;
+    if (!state.discovered.includes(prior.jobId)) state.discovered.push(prior.jobId);
+    if (['needs_attention', 'ready_to_submit', 'submitted_unconfirmed'].includes(prior.status) && !state.pending.includes(prior.jobId)) state.pending.push(prior.jobId);
+  }
   const candidates = jobs
     .filter((job) => inScope(job, profile))
     .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
-    .filter((job) => job.match >= minimumMatch && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && !state.pending.includes(job.id))
+    .filter((job) => job.match >= minimumMatch && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && !state.pending.includes(job.id) && !state.discovered.includes(job.id))
     .sort((a, b) => b.match - a.match)
-    .slice(0, Math.max(0, dailyLimit - Math.max(state.submittedToday, state.attemptedToday)));
-  const previousResults = await readJson(resultFile, { results: [] });
-  const results = previousResults.results || [];
+    .slice(0, 30);
   const cycleResults = [];
-  if (!candidates.length) console.log(`Sin ofertas nuevas por encima de ${minimumMatch}%.`);
-  else console.log(`Agente Postula · ${candidates.length} ofertas compatibles para revisar · encaje mínimo ${minimumMatch}% · tope diario ${dailyLimit}`);
+  const matchCount = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.applied.includes(job.id)).length;
+  if (!candidates.length) console.log(`Ciclo completo · ${matchCount} ofertas coinciden con tu perfil; ninguna nueva para revisar.`);
+  else console.log(`Agente Postula · ${candidates.length} ofertas nuevas · ${matchCount} compatibles · encaje mínimo ${minimumMatch}% · máximo ${dailyLimit} envíos/día`);
 
   for (const job of candidates) {
   const result = { jobId: job.id, source: job.source, company: job.company, role: job.role, url: job.url, match: job.match, at: new Date().toISOString() };
+  state.discovered.push(job.id);
   let page;
   try {
     page = await context.newPage();
     const cvPath = await createResumePdf(pdfBrowser, job, profile, workDir);
-    await page.goto(job.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.goto(job.listingUrl || job.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForTimeout(1500);
-    const applicationUrl = await findApplicationUrl(page);
+    const applicationUrl = await findApplicationUrl(page, job);
     if (applicationUrl && applicationUrl !== page.url()) await page.goto(applicationUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
     result.url = page.url();
     await page.waitForTimeout(1200);
@@ -97,9 +105,13 @@ while (keepRunning) {
           result.status = 'needs_attention';
           result.reason = 'No pude identificar un único botón de envío seguro.';
         } else {
-          const approved = await confirmSubmission(job);
+          if (state.attemptedToday >= dailyLimit) {
+            result.status = 'ready_to_submit';
+            result.reason = `Formulario completo; se alcanzó el máximo de ${dailyLimit} envíos de hoy. Revisalo en la pestaña abierta.`;
+          } else {
+          const approved = await confirmSubmission(job, page);
           if (!approved) {
-            result.status = 'needs_attention';
+            result.status = 'ready_to_submit';
             result.reason = 'Formulario completo; falta confirmación manual para enviar la postulación.';
           } else {
             state.attempted.push(job.id);
@@ -119,6 +131,7 @@ while (keepRunning) {
               result.reason = 'Se envió el formulario, pero el portal no mostró una confirmación reconocible. Revisá la página abierta.';
             }
           }
+          }
         }
       }
     }
@@ -126,7 +139,7 @@ while (keepRunning) {
     const message = String(error?.message || error);
     if (/No encontré un formulario de candidatura reconocible/i.test(message)) {
       result.status = 'needs_attention';
-      result.reason = 'El aviso no mostró un formulario que el agente pueda completar. Dejé la página abierta para que revises el enlace de postulación.';
+      result.reason = `No se detectó un formulario automático. Página actual: ${result.url || job.url}`;
     } else {
       result.status = 'error';
       result.reason = message.slice(0, 400);
@@ -137,11 +150,11 @@ while (keepRunning) {
   await writeFile(stateFile, JSON.stringify(state, null, 2));
   await writeFile(resultFile, JSON.stringify({ date: today, results }, null, 2));
   console.log(`${result.status.padEnd(22)} [${job.source || 'bolsa'}] ${job.company} · ${job.role}${result.reason ? ` — ${result.reason}` : ''}`);
-    if (page && result.status !== 'needs_attention' && result.status !== 'submitted_unconfirmed') await page.close().catch(() => {});
+    if (page && !['ready_to_submit', 'submitted_unconfirmed'].includes(result.status)) await page.close().catch(() => {});
   }
-  if (cycleResults.some((result) => ['needs_attention', 'submitted_unconfirmed'].includes(result.status))) {
-    console.log('Dejé el navegador abierto en los casos pendientes. Revisalos en el portal; el agente no va a adivinar respuestas ni resolver verificaciones.');
-    for (const result of cycleResults.filter((entry) => entry.status === 'needs_attention')) {
+  if (cycleResults.length) {
+    console.log(`${cycleResults.filter((result) => result.status === 'ready_to_submit').length} formularios listos para revisión · ${cycleResults.filter((result) => result.status === 'needs_attention').length} casos que requieren intervención. Detalle en results.json.`);
+    for (const result of cycleResults.filter((entry) => ['needs_attention', 'submitted_unconfirmed', 'ready_to_submit'].includes(entry.status))) {
       if (!state.pending.includes(result.jobId)) state.pending.push(result.jobId);
     }
     await writeFile(stateFile, JSON.stringify(state, null, 2));
@@ -165,7 +178,7 @@ async function readJson(file, fallback) {
 async function wait(minutes) { await new Promise((resolve) => setTimeout(resolve, minutes * 60 * 1000)); }
 function localDate() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 
-async function confirmSubmission(job) {
+async function confirmSubmission(job, page) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.log(`Confirmación manual requerida antes de enviar: ${job.company} · ${job.role}`);
     return false;
@@ -174,12 +187,13 @@ async function confirmSubmission(job) {
   const prompt = createInterface({ input: process.stdin, output: process.stdout });
   try {
     console.log(`\nFormulario completo: ${job.company} · ${job.role}`);
-    console.log(`Revisalo en el navegador: ${job.url}`);
+    console.log(`Revisalo en el navegador: ${page.url()}`);
     return (await prompt.question('Escribí ENVIAR para presentar esta candidatura, o Enter para dejarla pendiente: ')).trim() === 'ENVIAR';
   } finally {
     prompt.close();
   }
 }
+
 
 async function discoverJobs(p) {
   const boards = String(p.greenhouse || '').split(/[\s,]+/).filter(Boolean);
@@ -330,7 +344,7 @@ function tailoredText(job, p) {
   const original = String(p.resume || '').trim() || [rankedExperience, p.skills].filter(Boolean).join('\n\n');
   const termsInJob = new Set(terms([job.role, job.description].join(' ')));
   const skills = String(p.skills || '').split(/[,;\n]/).map((skill) => skill.trim()).filter((skill) => skill && terms(skill).some((word) => termsInJob.has(word)));
-  return `${p.name}${p.location ? ` · ${p.location}` : ''}\n${[p.email, p.phone, p.link].filter(Boolean).join(' · ')}\n\n${job.role} · ${job.company}\n\n${p.summary || ''}${skills.length ? `\n\nCOMPETENCIAS RELEVANTES\n${skills.join(' · ')}` : ''}\n\nEXPERIENCIA Y CV DE ORIGEN\n${original}\n\nSe priorizan el puesto y las competencias que ya aparecen en tu perfil. No se agregan logros ni credenciales.`.trim();
+  return `${p.name}${p.location ? ` · ${p.location}` : ''}\n${[p.email, p.phone, p.link].filter(Boolean).join(' · ')}\n\n${job.role} · ${job.company}\n\n${p.summary || ''}${skills.length ? `\n\nCOMPETENCIAS RELEVANTES\n${skills.join(' · ')}` : ''}\n\nEXPERIENCIA RELEVANTE\n${rankedExperience || original}\n\nCV DE ORIGEN\n${original}\n\nSe priorizan el puesto y las competencias que ya aparecen en tu perfil. No se agregan logros ni credenciales.`.trim();
 }
 
 async function createResumePdf(context, job, p, dir) {
@@ -349,18 +363,30 @@ function htmlEscape(value = '') { return String(value).replace(/[&<>"']/g, (c) =
 async function hasBlocker(page) {
   return /captcha|verify you are human|checking your browser|security verification|robot check/i.test(await page.locator('body').innerText({ timeout: 5000 }).catch(() => ''));
 }
-async function findApplicationUrl(page) {
+async function findApplicationUrl(page, job = {}) {
+  const currentOrigin = new URL(page.url()).origin;
+  const candidates = await page.locator('a[href]').evaluateAll((links) => links.map((link) => ({
+    href: link.href,
+    label: `${link.innerText || ''} ${link.getAttribute('aria-label') || ''} ${link.title || ''}`.trim(),
+    host: (() => { try { return new URL(link.href).hostname; } catch { return ''; } })(),
+  })));
+  const external = candidates.filter((link) => {
+    if (!/^https?:/i.test(link.href) || new URL(link.href).origin === currentOrigin) return false;
+    const host = link.host.toLowerCase();
+    return /apply|application|career|job|candidate|workable|greenhouse|lever|ashby|smartrecruiters|teamtailor|bamboohr|jobvite|workday|icims|recruitee/i.test(`${link.label} ${link.href} ${host}`);
+  });
+  const jobCompany = String(job.company || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const official = external.find((link) => jobCompany && (new URL(link.href).hostname.toLowerCase().replace(/[^a-z0-9]/g, '').includes(jobCompany) || jobCompany.includes(new URL(link.href).hostname.split('.')[0].replace(/[^a-z0-9]/g, ''))));
+  const ats = external.find((link) => /greenhouse|lever\.co|ashbyhq|smartrecruiters|teamtailor|bamboohr|jobvite|workday|icims|recruitee/i.test(link.href));
+  const explicit = external.find((link) => /apply|application|apply now|apply for this job|postular|aplicar/i.test(link.label));
+  const chosen = official || ats || explicit;
+  if (chosen) return chosen.href;
   const link = page.getByRole('link', { name: /apply|apply now|aplicar|postular|apply for this job/i }).first();
   if (await link.count().catch(() => 0)) {
     const href = await link.getAttribute('href').catch(() => null);
     if (href) return new URL(href, page.url()).href;
   }
-  const button = page.getByRole('button', { name: /apply|apply now|aplicar|postular|apply for this job/i }).first();
-  if (await button.count().catch(() => 0)) {
-    await button.click({ timeout: 6000 }).catch(() => {});
-    await page.waitForTimeout(900);
-    return page.url();
-  }
+  if (job.source === 'Himalayas' && job.url && new URL(job.url).origin !== currentOrigin) return job.url;
   return null;
 }
 async function hasConfirmation(page) {
@@ -384,7 +410,7 @@ async function openApplicationForm(page) {
     const href = await applyLink.getAttribute('href').catch(() => null);
     if (href) {
       const destination = new URL(href, page.url()).href;
-      if (destination !== page.url()) await page.goto(destination, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      if (destination !== page.url() && new URL(destination).origin !== new URL(page.url()).origin) await page.goto(destination, { waitUntil: 'domcontentloaded', timeout: 45000 });
     } else {
       await applyLink.evaluate((element) => element.click()).catch(() => {});
     }
