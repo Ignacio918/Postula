@@ -282,8 +282,11 @@ function Start-PostulaAgent {
 }
 
 function Invoke-PostulaApi([string]$Route, $Payload = $null) {
-  $parameters = @{ Uri = "$($script:ApiBase)$Route"; Method = 'Post'; TimeoutSec = 60; ContentType = 'application/json' }
-  if ($null -ne $Payload) { $parameters.Body = $Payload | ConvertTo-Json -Compress }
+  $parameters = @{ Uri = "$($script:ApiBase)$Route"; Method = 'Post'; TimeoutSec = 60; ContentType = 'application/json; charset=utf-8' }
+  if ($null -ne $Payload) {
+    $json = ConvertTo-Json -InputObject $Payload -Depth 20 -Compress
+    $parameters.Body = [System.Text.Encoding]::UTF8.GetBytes($json)
+  }
   try { return Invoke-RestMethod @parameters }
   catch {
     $response = $_.Exception.Response
