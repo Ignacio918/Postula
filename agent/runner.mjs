@@ -37,6 +37,9 @@ for (const application of payload.applications || []) {
 const isBatch = Array.isArray(payload.jobs) && payload.jobs.length > 0;
 const intervalMinutes = Math.max(15, Math.min(1440, Number(settings.intervalMinutes || 30)));
 const browserHeadless = settings.browserHeadless !== false;
+const webSearchIntervalMs = 6 * 60 * 60 * 1000;
+let lastWebSearchAt = 0;
+let lastWebSearchNoticeAt = 0;
 const approvalRequests = new Map();
 const approvedApplications = new Set();
 let liveStatus = { phase: 'Iniciando', jobsFound: 0, matched: 0, currentJob: null, updatedAt: new Date().toISOString() };
@@ -75,6 +78,8 @@ while (keepRunning) {
   }
   const previousResults = await readJson(resultFile, { results: [] });
   const results = previousResults.results || [];
+  const excludedOffers = new Set(results.filter((entry) => entry.status === 'excluded').map(offerFingerprint));
+  const appliedOffers = new Set(results.filter((entry) => ['submitted', 'submitted_unconfirmed'].includes(entry.status)).map(offerFingerprint));
   for (const prior of results) {
     if (!prior.jobId) continue;
     if (!state.discovered.includes(prior.jobId)) state.discovered.push(prior.jobId);
@@ -88,11 +93,11 @@ while (keepRunning) {
   const candidates = jobs
     .filter((job) => inScope(job, profile))
     .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
-    .filter((job) => job.match >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && (state.retryQueue.includes(job.id) || (!state.pending.includes(job.id) && !state.discovered.includes(job.id))))
+    .filter((job) => job.match >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job)) && (state.retryQueue.includes(job.id) || (!state.pending.includes(job.id) && !state.discovered.includes(job.id))))
     .sort((a, b) => b.match - a.match)
     .slice(0, state.retryQueue.length ? 3 : 30);
   const cycleResults = [];
-  const matchCount = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id)).length;
+  const matchCount = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job))).length;
   await setLiveStatus({ phase: candidates.length ? 'Revisando ofertas compatibles' : 'Búsqueda en curso', jobsFound: jobs.length, matched: matchCount, currentJob: null, error: '' });
   if (!candidates.length) console.log(`Ciclo completo · ${matchCount} ofertas coinciden con tu perfil; ninguna nueva para revisar.`);
   else console.log(`Agente Postula · ${candidates.length} ofertas nuevas · ${matchCount} compatibles · encaje mínimo ${minimumMatch}% · máximo ${dailyLimit} envíos/día`);
@@ -408,6 +413,7 @@ async function discoverJobs(p) {
       const json = await response.json();
       return json.map((job) => ({ id: `lv-${job.id}`, company: label(site), role: job.text, url: job.applyUrl || job.hostedUrl, location: job.categories?.location || '', description: job.descriptionPlain || stripHtml(job.description || ''), source: 'Lever' }));
     }),
+    discoverWebSearch(p),
   ]);
   const jobs = [];
   for (const result of lists) {
@@ -417,6 +423,114 @@ async function discoverJobs(p) {
   if (!jobs.length) throw new Error('Ninguna fuente respondió.');
   const keyText = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
   return [...new Map(jobs.filter((job) => job.url).map((job) => [`${keyText(job.company)}|${keyText(job.role)}`, job])).values()];
+}
+
+async function discoverWebSearch(p) {
+  const keyPath = path.join(workDir, 'brave-search-api-key.txt');
+  const apiKey = process.env.POSTULA_BRAVE_SEARCH_API_KEY || (await readFile(keyPath, 'utf8').catch(() => '')).trim();
+  if (!apiKey) {
+    if (Date.now() - lastWebSearchNoticeAt > webSearchIntervalMs) {
+      console.log('Búsqueda web amplia desactivada: agregá tu clave privada en .postula-agent/brave-search-api-key.txt.');
+      lastWebSearchNoticeAt = Date.now();
+    }
+    return [];
+  }
+  if (lastWebSearchAt && Date.now() - lastWebSearchAt < webSearchIntervalMs) return [];
+  lastWebSearchAt = Date.now();
+  const configuredRoles = String(p.roles || '').split(/[,;\n]+/).map((role) => role.trim()).filter(Boolean);
+  const roles = configuredRoles.length ? configuredRoles : ['Product Designer', 'Design Engineer', 'Project Manager'];
+  const midpoint = Math.ceil(roles.length / 2);
+  const quoteRoles = (values) => values.map((role) => `"${role.replace(/["\\]/g, '')}"`).join(' OR ');
+  const queryGroups = [
+    `(${quoteRoles(roles.slice(0, midpoint))}) (remote OR remoto OR Argentina OR LATAM) (jobs OR careers OR empleo)`,
+    `(${quoteRoles(roles.slice(midpoint).length ? roles.slice(midpoint) : roles.slice(0, midpoint))}) (remote OR remoto OR Argentina OR LATAM) (jobs OR careers OR empleo)`,
+  ];
+  const searchResults = [];
+  for (const q of queryGroups) {
+    try {
+      const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({ q, count: '20', country: 'AR', search_lang: 'en' })}`, {
+        headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey }, signal: AbortSignal.timeout(20000),
+      });
+      if (!response.ok) throw new Error(`Brave Search HTTP ${response.status}`);
+      const data = await response.json();
+      searchResults.push(...(data.web?.results || []));
+    } catch (error) {
+      console.warn(`Búsqueda web: ${error.message || error}`);
+      if (/HTTP 401|HTTP 403/.test(String(error.message))) break;
+    }
+  }
+  if (!searchResults.length) return [];
+
+  // Search-result text is used only in memory for discovery. Persist only job data
+  // retrieved from the employer's own page or a public ATS posting API.
+  const jobs = [];
+  const boards = new Map();
+  for (const result of searchResults) {
+    let url;
+    try { url = new URL(result.url); } catch { continue; }
+    const parts = url.pathname.split('/').filter(Boolean);
+    const host = url.hostname.toLowerCase();
+    if (host === 'jobs.ashbyhq.com' && parts[0]) boards.set(`ashby:${parts[0]}`, { kind: 'ashby', slug: parts[0] });
+    else if (host === 'boards.greenhouse.io' && parts[0]) boards.set(`greenhouse:${parts[0]}`, { kind: 'greenhouse', slug: parts[0] });
+    else if (host === 'jobs.lever.co' && parts[0]) boards.set(`lever:${parts[0]}`, { kind: 'lever', slug: parts[0] });
+    else if (host.endsWith('.lever.co') && parts.length) boards.set(`lever:${host.split('.')[0]}`, { kind: 'lever', slug: host.split('.')[0] });
+  }
+  const boardResults = await Promise.allSettled([...boards.values()].slice(0, 12).map(fetchPublicBoard));
+  for (const result of boardResults) if (result.status === 'fulfilled') jobs.push(...result.value);
+
+  const likelyJobPages = searchResults.filter((result) => {
+    try {
+      const url = new URL(result.url);
+      return !['jobs.ashbyhq.com', 'boards.greenhouse.io', 'jobs.lever.co'].includes(url.hostname) && /job|career|vacan|position|opening|apply/i.test(`${url.pathname} ${result.title || ''}`);
+    } catch { return false; }
+  }).slice(0, 12);
+  const employerPages = await Promise.allSettled(likelyJobPages.map(fetchStructuredEmployerJob));
+  for (const result of employerPages) if (result.status === 'fulfilled' && result.value) jobs.push(result.value);
+  console.log(`Búsqueda web: ${searchResults.length} resultados transitorios · ${jobs.length} vacantes verificadas en páginas oficiales/ATS.`);
+  return jobs;
+}
+
+async function fetchPublicBoard(board) {
+  let endpoint;
+  if (board.kind === 'ashby') endpoint = `https://api.ashbyhq.com/posting-api/job-board/${encodeURIComponent(board.slug)}`;
+  if (board.kind === 'greenhouse') endpoint = `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board.slug)}/jobs?content=true`;
+  if (board.kind === 'lever') endpoint = `https://api.lever.co/v0/postings/${encodeURIComponent(board.slug)}?mode=json`;
+  const response = await fetch(endpoint, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw new Error(`${board.kind} ${board.slug}: HTTP ${response.status}`);
+  const data = await response.json();
+  if (board.kind === 'ashby') return (data.jobs || []).filter((job) => job.isListed !== false).map((job) => ({
+    id: `ashby-${job.jobUrl || job.applyUrl}`, company: label(board.slug), role: job.title, url: job.applyUrl || job.jobUrl,
+    location: job.location || (job.isRemote ? 'Remote' : ''), description: stripHtml(job.descriptionPlain || job.descriptionHtml || ''), source: 'Ashby', remote: job.isRemote === true,
+  }));
+  if (board.kind === 'greenhouse') return (data.jobs || []).map((job) => ({ id: `gh-${job.id}`, company: label(board.slug), role: job.title, url: job.absolute_url, location: job.location?.name || '', description: stripHtml(job.content || ''), source: 'Greenhouse' }));
+  return (data || []).map((job) => ({ id: `lv-${job.id}`, company: label(board.slug), role: job.text, url: job.applyUrl || job.hostedUrl, location: job.categories?.location || '', description: job.descriptionPlain || stripHtml(job.description || ''), source: 'Lever' }));
+}
+
+async function fetchStructuredEmployerJob(result) {
+  let url;
+  try { url = new URL(result.url); } catch { return null; }
+  if (!/^https?:$/.test(url.protocol)) return null;
+  const response = await fetch(url, { headers: { Accept: 'text/html', 'User-Agent': 'Mozilla/5.0 Postula job discovery' }, signal: AbortSignal.timeout(12000) });
+  if (!response.ok) return null;
+  const html = (await response.text()).slice(0, 2_000_000);
+  const scripts = [...html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const [, raw] of scripts) {
+    try {
+      const parsed = JSON.parse(raw.trim().replace(/^<!--|-->$/g, ''));
+      const nodes = Array.isArray(parsed) ? parsed : parsed['@graph'] ? parsed['@graph'] : [parsed];
+      const posting = nodes.find((node) => String(node['@type']).split(/[\s,]+/).includes('JobPosting'));
+      if (!posting || !posting.title || (posting.validThrough && Date.parse(posting.validThrough) < Date.now())) continue;
+      const company = typeof posting.hiringOrganization === 'object' ? posting.hiringOrganization.name : '';
+      const location = posting.jobLocationType === 'TELECOMMUTE' ? 'Remote' : (posting.jobLocation?.address?.addressLocality || posting.jobLocation?.address?.addressRegion || '');
+      return { id: `web-${new URL(result.url).hostname}-${encodeURIComponent(posting.identifier?.value || posting.title)}`, company: company || new URL(result.url).hostname.replace(/^www\./, ''), role: posting.title, url: posting.url || result.url, location, description: stripHtml(posting.description || ''), source: 'Web · página oficial', remote: posting.jobLocationType === 'TELECOMMUTE' };
+    } catch { /* ignore malformed JSON-LD */ }
+  }
+  return null;
+}
+
+function offerFingerprint(job) {
+  const normalize = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  return `${normalize(job.company)}|${normalize(job.role)}`;
 }
 
 async function discoverRemotive() {
