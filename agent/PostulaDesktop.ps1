@@ -135,6 +135,7 @@ $xamlText = @'
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
           <Ellipse x:Name="ConnectionDot" Width="8" Height="8" Fill="#9A978F" Margin="0,0,8,0"/>
           <TextBlock x:Name="ConnectionLabel" Text="Conectando…" FontSize="12" Foreground="#5F5D59" VerticalAlignment="Center" Margin="0,0,18,0"/>
+          <Button x:Name="ConfigureButton" Content="Configurar CV y búsqueda" Margin="0,0,10,0"/>
           <Button x:Name="AgentToggle" Content="Detener agente" MinWidth="120"/>
         </StackPanel>
       </Grid>
@@ -192,11 +193,14 @@ $xamlText = @'
           </StackPanel>
 
           <StackPanel Grid.Column="2">
+            <Border Background="#FFFFFF" BorderBrush="#E5E3DF" BorderThickness="1" CornerRadius="8" Margin="0,0,0,18">
+              <StackPanel><StackPanel Margin="18,15,18,11"><TextBlock Text="Ofertas que coinciden" FontSize="15" FontWeight="SemiBold" Foreground="#171715"/><TextBlock Text="Ranking TF-IDF local · elegibilidad remota desde Argentina" FontSize="12" Foreground="#5F5D59" Margin="0,3,0,0"/></StackPanel><Border Height="1" Background="#EEEBE8" Margin="18,0,18,0"/><StackPanel x:Name="MatchesHost" Margin="18,12,18,18"><TextBlock Text="Configurá tu CV y tocá Buscar ahora para ver resultados." FontSize="13" Foreground="#5F5D59" TextWrapping="Wrap"/></StackPanel></StackPanel>
+            </Border>
             <Border x:Name="ApprovalCard" Background="#FFFFFF" BorderBrush="#1D5FBF" BorderThickness="1,2,1,1" CornerRadius="8" Margin="0,0,0,18">
               <StackPanel><StackPanel Margin="18,15,18,11"><TextBlock Text="Listas para enviar" FontSize="15" FontWeight="SemiBold" Foreground="#171715"/><TextBlock Text="Revisá la empresa y el puesto antes de cada envío." FontSize="12" Foreground="#5F5D59" Margin="0,3,0,0" TextWrapping="Wrap"/></StackPanel><Border Height="1" Background="#EEEBE8" Margin="18,0,18,0"/><StackPanel x:Name="ApprovalHost" Margin="18,12,18,18"><TextBlock Text="No hay formularios esperando confirmación." FontSize="13" Foreground="#5F5D59" TextWrapping="Wrap"/></StackPanel></StackPanel>
             </Border>
             <Border Background="#FFFFFF" BorderBrush="#E5E3DF" BorderThickness="1" CornerRadius="8" Padding="18">
-              <StackPanel><TextBlock Text="Cómo opera" FontSize="15" FontWeight="SemiBold" Foreground="#171715"/><TextBlock Text="Tus datos se procesan localmente en esta computadora." FontSize="12" Foreground="#5F5D59" Margin="0,3,0,10"/><TextBlock Text="Para Argentina prioriza remoto real y filtra puestos híbridos o limitados a otros países. El navegador trabaja oculto. Abrí un aviso desde Actividad reciente solo si querés revisarlo. Si falta una respuesta o aparece una verificación, Postula la marca para atención manual; no adivina datos ni resuelve CAPTCHAs." FontSize="12" Foreground="#5F5D59" TextWrapping="Wrap"/></StackPanel>
+              <StackPanel><TextBlock Text="Cómo opera" FontSize="15" FontWeight="SemiBold" Foreground="#171715"/><TextBlock Text="El CV se analiza en esta computadora. Python consulta RSS públicos y extrae avisos JobPosting; TF-IDF ordena el encaje sin tokens de IA. Abrí el formulario oficial desde cada oferta y completá el envío allí. El agente puede completar formularios compatibles; CAPTCHA y datos desconocidos quedan para revisión humana." FontSize="12" Foreground="#5F5D59" Margin="0,3,0,10" TextWrapping="Wrap"/></StackPanel>
             </Border>
           </StackPanel>
         </Grid>
@@ -247,7 +251,9 @@ $script:MetricMatched = $window.FindName('MetricMatched')
 $script:MetricReady = $window.FindName('MetricReady')
 $script:MetricSubmitted = $window.FindName('MetricSubmitted')
 $script:RecentHost = $window.FindName('RecentHost')
+$script:MatchesHost = $window.FindName('MatchesHost')
 $script:ApprovalHost = $window.FindName('ApprovalHost')
+$script:ConfigureButton = $window.FindName('ConfigureButton')
 $script:AgentToggle = $window.FindName('AgentToggle')
 $script:Steps = @(
   $window.FindName('Step1'), $window.FindName('Step2'), $window.FindName('Step3'), $window.FindName('Step4'),
@@ -276,9 +282,82 @@ function Start-PostulaAgent {
 }
 
 function Invoke-PostulaApi([string]$Route, $Payload = $null) {
-  $parameters = @{ Uri = "$($script:ApiBase)$Route"; Method = 'Post'; TimeoutSec = 5; ContentType = 'application/json' }
+  $parameters = @{ Uri = "$($script:ApiBase)$Route"; Method = 'Post'; TimeoutSec = 60; ContentType = 'application/json' }
   if ($null -ne $Payload) { $parameters.Body = $Payload | ConvertTo-Json -Compress }
   Invoke-RestMethod @parameters
+}
+
+function Add-ProfileField($Panel, [string]$Label, [string]$Value, [int]$Height = 38) {
+  $caption = New-Object System.Windows.Controls.TextBlock
+  $caption.Text = $Label; $caption.FontSize = 12; $caption.Foreground = $script:MutedBrush; $caption.Margin = '0,10,0,5'
+  [void]$Panel.Children.Add($caption)
+  $inputBox = New-Object System.Windows.Controls.TextBox
+  $inputBox.Text = $Value; $inputBox.Height = $Height; $inputBox.FontSize = 13; $inputBox.Padding = '9,7'; $inputBox.VerticalContentAlignment = 'Center'
+  if ($Height -gt 50) { $inputBox.AcceptsReturn = $true; $inputBox.TextWrapping = 'Wrap'; $inputBox.VerticalScrollBarVisibility = 'Auto'; $inputBox.VerticalContentAlignment = 'Top' }
+  [void]$Panel.Children.Add($inputBox)
+  return $inputBox
+}
+
+function Show-ProfileDialog {
+  try { $saved = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json; $p = $saved.profile } catch { $saved = [pscustomobject]@{}; $p = [pscustomobject]@{} }
+  $dialog = New-Object System.Windows.Window
+  $dialog.Title = 'Configurá tu perfil y búsqueda · Postula'; $dialog.Width = 720; $dialog.Height = 820; $dialog.MinWidth = 620; $dialog.MinHeight = 640
+  $dialog.WindowStartupLocation = 'CenterOwner'; $dialog.Owner = $window; $dialog.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#F4F3F1')
+  $outer = New-Object System.Windows.Controls.DockPanel; $dialog.Content = $outer
+  $actions = New-Object System.Windows.Controls.StackPanel; $actions.Orientation = 'Horizontal'; $actions.HorizontalAlignment = 'Right'; $actions.Margin = '22,12,22,16'
+  [System.Windows.Controls.DockPanel]::SetDock($actions, 'Bottom'); [void]$outer.Children.Add($actions)
+  $cancel = New-Object System.Windows.Controls.Button; $cancel.Content = 'Cancelar'; $cancel.Margin = '0,0,9,0'; $cancel.Add_Click({ $dialog.Close() }.GetNewClosure()); [void]$actions.Children.Add($cancel)
+  $save = New-Object System.Windows.Controls.Button; $save.Content = 'Guardar y buscar ahora'; $save.Style = $window.FindResource('PrimaryButton'); [void]$actions.Children.Add($save)
+  $scroll = New-Object System.Windows.Controls.ScrollViewer; $scroll.VerticalScrollBarVisibility = 'Auto'; [void]$outer.Children.Add($scroll)
+  $form = New-Object System.Windows.Controls.StackPanel; $form.Margin = '25,22,25,12'; $scroll.Content = $form
+  $heading = New-Object System.Windows.Controls.TextBlock; $heading.Text = 'Prepará tu búsqueda'; $heading.FontSize = 23; $heading.FontWeight = 'SemiBold'; $heading.Foreground = $script:InkBrush; [void]$form.Children.Add($heading)
+  $intro = New-Object System.Windows.Controls.TextBlock; $intro.Text = 'Cargá el CV y elegí qué querés buscar. Postula extrae el texto y calcula el encaje en esta computadora, sin mandar tu CV a una IA.'; $intro.FontSize = 13; $intro.Foreground = $script:MutedBrush; $intro.TextWrapping = 'Wrap'; $intro.Margin = '0,5,0,8'; [void]$form.Children.Add($intro)
+  $name = Add-ProfileField $form 'Nombre y apellido' ([string]$p.name)
+  $email = Add-ProfileField $form 'Email' ([string]$p.email)
+  $roles = Add-ProfileField $form 'Puestos (separados por coma)' ([string]$p.roles)
+  $location = Add-ProfileField $form 'Ubicación' ($(if ($p.location) { [string]$p.location } else { 'Buenos Aires, Argentina' }))
+  $mode = Add-ProfileField $form 'Modalidad' ($(if ($p.mode) { [string]$p.mode } else { 'Remoto' }))
+  $minMatch = Add-ProfileField $form 'Encaje mínimo (%)' ([string]$(if ($saved.settings.minimumMatch) { $saved.settings.minimumMatch } else { 60 }))
+  $dailyLimit = Add-ProfileField $form 'Máximo de candidaturas automáticas por día' ([string]$(if ($saved.settings.dailyLimit) { $saved.settings.dailyLimit } else { 5 }))
+  $cvHeading = New-Object System.Windows.Controls.TextBlock; $cvHeading.Text = 'CV · análisis local'; $cvHeading.FontSize = 16; $cvHeading.FontWeight = 'SemiBold'; $cvHeading.Foreground = $script:InkBrush; $cvHeading.Margin = '0,18,0,4'; [void]$form.Children.Add($cvHeading)
+  $cvNote = New-Object System.Windows.Controls.TextBlock; $cvNote.Text = 'PDF o TXT · máximo 8 MB. El texto extraído se guarda en el archivo local de configuración y se usa para el ranking TF-IDF.'; $cvNote.FontSize = 12; $cvNote.Foreground = $script:MutedBrush; $cvNote.TextWrapping = 'Wrap'; [void]$form.Children.Add($cvNote)
+  $cvRow = New-Object System.Windows.Controls.StackPanel; $cvRow.Orientation = 'Horizontal'; $cvRow.Margin = '0,10,0,3'; [void]$form.Children.Add($cvRow)
+  $chooseCv = New-Object System.Windows.Controls.Button; $chooseCv.Content = 'Cargar y analizar CV'; [void]$cvRow.Children.Add($chooseCv)
+  $fileLabel = New-Object System.Windows.Controls.TextBlock; $fileLabel.Text = if ($p.resume) { 'CV guardado localmente' } else { 'Todavía no cargaste un CV' }; $fileLabel.VerticalAlignment = 'Center'; $fileLabel.Margin = '10,0,0,0'; $fileLabel.Foreground = $script:MutedBrush; [void]$cvRow.Children.Add($fileLabel)
+  $resume = Add-ProfileField $form 'Texto del CV' ([string]$p.resume) 220
+  $summary = Add-ProfileField $form 'Resumen profesional (opcional)' ([string]$p.summary) 90
+  $skills = Add-ProfileField $form 'Habilidades (opcional)' ([string]$p.skills) 64
+  $chooseCv.Add_Click({
+    $picker = New-Object Microsoft.Win32.OpenFileDialog; $picker.Title = 'Elegí tu CV'; $picker.Filter = 'CV PDF o texto (*.pdf;*.txt)|*.pdf;*.txt'; $picker.CheckFileExists = $true
+    if ($picker.ShowDialog($dialog) -ne $true) { return }
+    $info = Get-Item -LiteralPath $picker.FileName
+    if ($info.Length -gt 8MB) { [System.Windows.MessageBox]::Show('El CV supera el límite de 8 MB.', 'Postula') | Out-Null; return }
+    try {
+      $bytes = [System.IO.File]::ReadAllBytes($picker.FileName)
+      $analysis = Invoke-PostulaApi '/api/analyze-cv' @{ fileName = $info.Name; contentBase64 = [Convert]::ToBase64String($bytes) }
+      $resume.Text = [string]$analysis.text; $fileLabel.Text = "Analizado: $($info.Name) · $($analysis.skills.Count) habilidades detectadas"
+      if (-not $name.Text.Trim() -and $analysis.name) { $name.Text = [string]$analysis.name }
+      if (-not $email.Text.Trim() -and $analysis.email) { $email.Text = [string]$analysis.email }
+      if (-not $p.phone -and $analysis.phone) { $p | Add-Member -NotePropertyName phone -NotePropertyValue ([string]$analysis.phone) -Force }
+      if ($analysis.skills.Count) { $skills.Text = (@($skills.Text -split ',\s*') + @($analysis.skills) | Where-Object { $_ } | Select-Object -Unique) -join ', ' }
+    } catch { [System.Windows.MessageBox]::Show("No pude analizar el CV:`n$($_.Exception.Message)", 'Postula', 'OK', 'Warning') | Out-Null }
+  }.GetNewClosure())
+  $save.Add_Click({
+    $button = $save; $button.IsEnabled = $false; $button.Content = 'Guardando y buscando…'
+    try {
+      $profileData = @{
+        name = $name.Text.Trim(); email = $email.Text.Trim(); phone = [string]$p.phone; location = $location.Text.Trim();
+        roles = $roles.Text.Trim(); mode = $mode.Text.Trim(); resume = $resume.Text.Trim(); summary = $summary.Text.Trim();
+        experience = [string]$p.experience; skills = $skills.Text.Trim(); link = [string]$p.link;
+        salaryExpectation = [string]$p.salaryExpectation; workAuthorization = [string]$p.workAuthorization;
+        applicationAnswers = $p.applicationAnswers
+      }
+      $response = Invoke-PostulaApi '/api/configure' @{ profile = $profileData; minimumMatch = [int]$minMatch.Text; dailyLimit = [int]$dailyLimit.Text }
+      $dialog.Close()
+      [System.Windows.MessageBox]::Show("Perfil guardado. El agente inició una búsqueda con $($response.minimumMatch)% de encaje mínimo. Los resultados aparecerán en esta ventana.", 'Postula') | Out-Null
+    } catch { $button.IsEnabled = $true; $button.Content = 'Guardar y buscar ahora'; [System.Windows.MessageBox]::Show("Revisá los campos obligatorios y volvé a intentar:`n$($_.Exception.Message)", 'Postula', 'OK', 'Warning') | Out-Null }
+  }.GetNewClosure())
+  [void]$dialog.ShowDialog()
 }
 
 function Get-StatusLabel([string]$status) {
@@ -340,6 +419,35 @@ function Render-Recent($items) {
     $rule = New-Object System.Windows.Controls.Border; $rule.Height = 1; $rule.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#EEEBE8'); $rule.Margin = '0,0,0,0'
     $cell = New-Object System.Windows.Controls.StackPanel; [void]$cell.Children.Add($row); [void]$cell.Children.Add($rule)
     [void]$script:RecentHost.Children.Add($cell)
+  }
+}
+
+function Render-Matches($items) {
+  $script:MatchesHost.Children.Clear()
+  $visible = @($items | Select-Object -First 8)
+  if ($visible.Count -eq 0) {
+    $empty = New-Object System.Windows.Controls.TextBlock
+    $empty.Text = 'Sin resultados todavía. Configurá el CV y elegí “Guardar y buscar ahora”.'; $empty.FontSize = 13; $empty.Foreground = $script:MutedBrush; $empty.TextWrapping = 'Wrap'
+    [void]$script:MatchesHost.Children.Add($empty); return
+  }
+  foreach ($entry in $visible) {
+    $item = $entry
+    $grid = New-Object System.Windows.Controls.Grid; $grid.Margin = '0,6,0,6'
+    [void]$grid.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
+    $actionColumn = New-Object System.Windows.Controls.ColumnDefinition; $actionColumn.Width = [System.Windows.GridLength]::Auto; [void]$grid.ColumnDefinitions.Add($actionColumn)
+    $details = New-Object System.Windows.Controls.StackPanel
+    $role = New-Object System.Windows.Controls.TextBlock; $role.Text = [string]$item.role; $role.FontSize = 13; $role.FontWeight = 'SemiBold'; $role.Foreground = $script:InkBrush; $role.TextWrapping = 'Wrap'
+    $company = New-Object System.Windows.Controls.TextBlock; $company.Text = "$($item.company) · $($item.source)"; $company.FontSize = 11; $company.Foreground = $script:MutedBrush; $company.Margin = '0,2,0,0'
+    $meta = New-Object System.Windows.Controls.TextBlock; $meta.Text = "$($item.location) · $($item.match)% encaje"; $meta.FontSize = 11; $meta.Foreground = $script:MutedBrush; $meta.Margin = '0,2,0,0'; $meta.TextWrapping = 'Wrap'
+    [void]$details.Children.Add($role); [void]$details.Children.Add($company); [void]$details.Children.Add($meta); [void]$grid.Children.Add($details)
+    $open = New-Object System.Windows.Controls.Button; $open.Content = 'Abrir oferta ↗'; $open.FontSize = 11; $open.Padding = '9,4'; $open.Margin = '10,0,0,0'; $open.VerticalAlignment = 'Center'
+    $open.Add_Click({
+      $targetUrl = [string]$item.url; $parsed = $null
+      if ([Uri]::TryCreate($targetUrl, [UriKind]::Absolute, [ref]$parsed) -and $parsed.Scheme -in @('https', 'http')) { Start-Process $parsed.AbsoluteUri }
+    }.GetNewClosure())
+    [System.Windows.Controls.Grid]::SetColumn($open, 1); [void]$grid.Children.Add($open)
+    $divider = New-Object System.Windows.Controls.Border; $divider.Height = 1; $divider.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#EEEBE8')
+    $cell = New-Object System.Windows.Controls.StackPanel; [void]$cell.Children.Add($grid); [void]$cell.Children.Add($divider); [void]$script:MatchesHost.Children.Add($cell)
   }
 }
 
@@ -409,6 +517,7 @@ function Update-Window($data) {
     $script:CurrentMatch.Text = ''
   }
   Set-Pipeline ([string]$job.stage) ([string]$status.phase)
+  Render-Matches $status.matches
   Render-Recent $data.recent
   Render-Approvals $data.pendingApprovals
   if ($script:AgentProcess -and $script:AgentProcess.HasExited) { $script:OwnsAgent = $false; $script:AgentProcess = $null }
@@ -430,6 +539,7 @@ $toggleClick = {
   }
 }.GetNewClosure()
 $script:AgentToggle.Add_Click($toggleClick)
+$script:ConfigureButton.Add_Click({ Show-ProfileDialog })
 
 $timer = New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromSeconds(2)

@@ -19,8 +19,8 @@ const profileFile = path.resolve(input);
 const payload = JSON.parse(await readFile(profileFile, 'utf8'));
 const profile = payload.profile || {};
 const settings = payload.settings || payload;
-const minimumMatch = Number(settings.minimumMatch || payload.autoThreshold || 80);
-const dailyLimit = Math.max(1, Math.min(20, Number(settings.dailyLimit || payload.dailyLimit || 5)));
+let minimumMatch = Number(settings.minimumMatch || settings.minimumMatchPercent || profile.autoThreshold || payload.autoThreshold || 80);
+let dailyLimit = Math.max(1, Math.min(20, Number(settings.dailyLimit || payload.dailyLimit || profile.dailyLimit || 5)));
 const stateFile = path.join(workDir, 'state.json');
 const resultFile = path.join(workDir, 'results.json');
 const statusFile = path.join(workDir, 'status.json');
@@ -45,6 +45,11 @@ const approvedApplications = new Set();
 let liveStatus = { phase: 'Iniciando', jobsFound: 0, matched: 0, currentJob: null, updatedAt: new Date().toISOString() };
 let activeApplicationPage = null;
 let keepRunning = true;
+let forceSearchRequested = false;
+let wakeScheduledSearch = null;
+let pendingDesktopConfig = null;
+let cachedProfileVectorKey = '';
+let cachedProfileVector = new Map();
 const stop = new Set('the and for with from that this your you our are can will have has into about role work team experience design designer product user users their they them as an a to of in on or is be we it by at across using use years strong ability skills what who all not'.split(' '));
 
 if (!profile.name || !profile.email || !profile.roles || !(profile.resume || profile.experience)) {
@@ -64,6 +69,14 @@ const context = await chromium.launchPersistentContext(path.join(workDir, 'brows
 });
 const pdfBrowser = await chromium.launch({ headless: true });
 while (keepRunning) {
+  if (pendingDesktopConfig) {
+    Object.assign(profile, pendingDesktopConfig.profile);
+    minimumMatch = pendingDesktopConfig.minimumMatch;
+    dailyLimit = pendingDesktopConfig.dailyLimit;
+    cachedProfileVectorKey = '';
+    cachedProfileVector = new Map();
+    pendingDesktopConfig = null;
+  }
   const today = localDate();
   if (state.date !== today) Object.assign(state, { date: today, submittedToday: 0, attemptedToday: 0 });
   let jobs;
@@ -99,7 +112,12 @@ while (keepRunning) {
     .slice(0, state.retryQueue.length ? 3 : 30);
   const cycleResults = [];
   const matchCount = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job)) && !pendingOffers.has(offerFingerprint(job))).length;
-  await setLiveStatus({ phase: candidates.length ? 'Revisando ofertas compatibles' : 'Búsqueda en curso', jobsFound: jobs.length, matched: matchCount, currentJob: null, error: '' });
+  const matches = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch).map((job) => ({
+    id: job.id, role: job.role, company: job.company, source: job.source || 'Fuente pública',
+    location: job.location || 'Remoto · alcance a confirmar', match: Number(job.score ?? scoreJob(job, profile)),
+    url: job.applicationUrl || job.applyUrl || job.url,
+  })).sort((a, b) => b.match - a.match).slice(0, 60);
+  await setLiveStatus({ phase: candidates.length ? 'Revisando ofertas compatibles' : 'Búsqueda en curso', jobsFound: jobs.length, matched: matchCount, matches, currentJob: null, error: '' });
   if (!candidates.length) console.log(`Ciclo completo · ${matchCount} ofertas coinciden con tu perfil; ninguna nueva para revisar.`);
   else console.log(`Agente Postula · ${candidates.length} ofertas nuevas · ${matchCount} compatibles · encaje mínimo ${minimumMatch}% · máximo ${dailyLimit} envíos/día`);
 
@@ -235,8 +253,12 @@ async function readJson(file, fallback) {
 }
 
 async function wait(minutes) {
-  const until = Date.now() + minutes * 60 * 1000;
-  while (keepRunning && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, Math.min(1000, until - Date.now())));
+  if (!keepRunning) return;
+  if (forceSearchRequested) { forceSearchRequested = false; return; }
+  await new Promise((resolve) => {
+    const timer = setTimeout(() => { wakeScheduledSearch = null; resolve(); }, minutes * 60 * 1000);
+    wakeScheduledSearch = () => { clearTimeout(timer); wakeScheduledSearch = null; forceSearchRequested = false; resolve(); };
+  });
 }
 function localDate() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 
@@ -286,6 +308,17 @@ async function setLiveStatus(update = {}) {
   }, null, 2));
 }
 
+async function readRequestJson(request, maximumBytes) {
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of request) {
+    bytes += chunk.length;
+    if (bytes > maximumBytes) throw new Error('El archivo excede el tamaño permitido.');
+    chunks.push(chunk);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
 async function startDashboard() {
   const port = Number(process.env.POSTULA_DASHBOARD_PORT || 4179);
   const server = createServer(async (request, response) => {
@@ -322,6 +355,62 @@ async function startDashboard() {
       }));
       return;
     }
+    if (request.method === 'POST' && pathname === '/api/analyze-cv') {
+      try {
+        const body = await readRequestJson(request, 12 * 1024 * 1024);
+        const fileBytes = Buffer.from(String(body.contentBase64 || ''), 'base64');
+        if (!fileBytes.length || fileBytes.length > 8 * 1024 * 1024) throw new Error('El CV debe tener contenido y pesar hasta 8 MB.');
+        let text;
+        if (/\.pdf$/i.test(String(body.fileName || ''))) {
+          const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+          const document = await pdfjs.getDocument({ data: new Uint8Array(fileBytes), useSystemFonts: true }).promise;
+          if (document.numPages > 35) throw new Error('El CV supera el máximo de 35 páginas.');
+          const pages = [];
+          for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+            const page = await document.getPage(pageNumber);
+            const content = await page.getTextContent();
+            pages.push(content.items.map((item) => item.str || '').join(' '));
+          }
+          text = pages.join('\n\n');
+        } else text = fileBytes.toString('utf8');
+        text = text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        if (text.length < 80) throw new Error('No pude extraer suficiente texto. Si el PDF es escaneado, pegá el texto del CV.');
+        const skillCatalog = ['figma', 'ux research', 'user research', 'product design', 'design systems', 'prototyping', 'accessibility', 'usability testing', 'interaction design', 'stakeholder management', 'project management', 'agile', 'scrum', 'jira', 'service design', 'html', 'css'];
+        const skills = skillCatalog.filter((skill) => text.toLowerCase().includes(skill));
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        response.end(JSON.stringify({ text, name: text.split(/\r?\n/).map((line) => line.trim()).find((line) => line && line.length < 80 && !/resume|curriculum vitae|\bcv\b/i.test(line)) || '', email: text.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i)?.[0] || '', phone: text.match(/(?:\+?\d[\d ()-]{7,}\d)/)?.[0]?.trim() || '', skills, analyzedAt: new Date().toISOString() }));
+      } catch (error) {
+        response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: error.message || 'No pude analizar el CV.' }));
+      }
+      return;
+    }
+    if (request.method === 'POST' && pathname === '/api/configure') {
+      try {
+        const body = await readRequestJson(request, 512 * 1024);
+        const incoming = body.profile || {};
+        const nextProfile = { ...profile };
+        for (const key of ['name', 'email', 'phone', 'location', 'roles', 'mode', 'resume', 'summary', 'experience', 'skills', 'link', 'salaryExpectation', 'workAuthorization']) {
+          if (typeof incoming[key] === 'string') nextProfile[key] = incoming[key].slice(0, key === 'resume' || key === 'experience' ? 250000 : 4000).trim();
+        }
+        nextProfile.mode ||= 'Remoto';
+        if (!nextProfile.name || !nextProfile.email || !nextProfile.roles || !nextProfile.resume) throw new Error('Completá nombre, email, puestos objetivo y CV.');
+        const nextMinimumMatch = Math.max(30, Math.min(95, Number(body.minimumMatch) || minimumMatch));
+        const nextDailyLimit = Math.max(1, Math.min(20, Number(body.dailyLimit) || dailyLimit));
+        settings.minimumMatch = nextMinimumMatch;
+        settings.dailyLimit = nextDailyLimit;
+        payload.profile = nextProfile;
+        payload.settings = settings;
+        await writeFile(profileFile, JSON.stringify(payload, null, 2), 'utf8');
+        pendingDesktopConfig = { profile: nextProfile, minimumMatch: nextMinimumMatch, dailyLimit: nextDailyLimit };
+        forceSearchRequested = true;
+        await setLiveStatus({ phase: 'Perfil guardado · buscando ahora', currentJob: null, error: '' });
+        wakeScheduledSearch?.();
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }).end(JSON.stringify({ ok: true, nextSearch: 'immediate', minimumMatch: nextMinimumMatch, dailyLimit: nextDailyLimit }));
+      } catch (error) {
+        response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: error.message || 'No pude guardar el perfil.' }));
+      }
+      return;
+    }
     if (request.method === 'POST' && pathname === '/api/approve') {
       let body = '';
       for await (const chunk of request) {
@@ -346,6 +435,7 @@ async function startDashboard() {
     }
     if (request.method === 'POST' && pathname === '/api/stop') {
       keepRunning = false;
+      wakeScheduledSearch?.();
       await setLiveStatus({ phase: 'Deteniendo el agente', currentJob: liveStatus.currentJob });
       response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ ok: true }));
       return;
@@ -713,15 +803,33 @@ function stripHtml(value) { return value.replace(/<[^>]*>/g, ' ').replace(/&nbsp
 function terms(value = '') { return (value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9+#.-]{3,}/g) || []).filter((word) => !stop.has(word)); }
 function roleTerms(value = '') { return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9+#.-]{3,}/g) || []; }
 function scoreJob(job, p) {
-  const profileWords = new Set(terms([p.roles, p.summary, p.experience, p.skills, p.resume].join(' ')));
-  const counts = new Map();
-  terms([job.role, job.description].join(' ')).forEach((word) => counts.set(word, (counts.get(word) || 0) + 1));
-  const jobWords = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([word]) => word);
-  const coverage = jobWords.filter((word) => profileWords.has(word)).length / Math.max(jobWords.length, 1);
-  const target = roleTerms(p.roles || '');
-  const roleWords = roleTerms(job.role);
+  const profileText = [p.roles, p.summary, p.experience, p.skills, p.resume].join(' ');
+  const cacheKey = profileText;
+  if (cachedProfileVectorKey !== cacheKey) {
+    const list = terms(profileText), counts = new Map();
+    for (const term of list) counts.set(term, (counts.get(term) || 0) + 1);
+    cachedProfileVector = new Map([...counts].map(([term, count]) => [term, count / Math.max(list.length, 1)]));
+    cachedProfileVectorKey = cacheKey;
+  }
+  const jobList = terms([job.role, job.description].join(' ')), jobCounts = new Map();
+  for (const term of jobList) jobCounts.set(term, (jobCounts.get(term) || 0) + 1);
+  const jobVector = new Map([...jobCounts].map(([term, count]) => [term, count / Math.max(jobList.length, 1)]));
+  const inverseDocumentFrequency = (term) => Math.log(3 / (1 + Number(cachedProfileVector.has(term)) + Number(jobVector.has(term)))) + 1;
+  let dot = 0, profileNorm = 0, jobNorm = 0;
+  for (const [term, value] of cachedProfileVector) {
+    const weighted = value * inverseDocumentFrequency(term);
+    const jobWeight = (jobVector.get(term) || 0) * inverseDocumentFrequency(term);
+    dot += weighted * jobWeight;
+    profileNorm += weighted * weighted;
+  }
+  for (const [term, value] of jobVector) {
+    const weighted = value * inverseDocumentFrequency(term);
+    jobNorm += weighted * weighted;
+  }
+  const similarity = dot / Math.max(Math.sqrt(profileNorm * jobNorm), 0.0001);
+  const target = roleTerms(p.roles || ''), roleWords = roleTerms(job.role);
   const roleFit = target.length ? roleWords.filter((word) => target.includes(word)).length / Math.max(roleWords.length, 1) : 0;
-  return Math.max(20, Math.min(98, Math.round(35 + coverage * 50 + roleFit * 15)));
+  return Math.max(0, Math.min(98, Math.round(similarity * 72 + roleFit * 26)));
 }
 
 function inScope(job, p) {
