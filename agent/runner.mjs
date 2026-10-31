@@ -80,6 +80,7 @@ while (keepRunning) {
   const results = previousResults.results || [];
   const excludedOffers = new Set(results.filter((entry) => entry.status === 'excluded').map(offerFingerprint));
   const appliedOffers = new Set(results.filter((entry) => ['submitted', 'submitted_unconfirmed'].includes(entry.status)).map(offerFingerprint));
+  const pendingOffers = new Set(results.filter((entry) => ['needs_attention', 'ready_to_submit'].includes(entry.status)).map(offerFingerprint));
   for (const prior of results) {
     if (!prior.jobId) continue;
     if (!state.discovered.includes(prior.jobId)) state.discovered.push(prior.jobId);
@@ -93,11 +94,11 @@ while (keepRunning) {
   const candidates = jobs
     .filter((job) => inScope(job, profile))
     .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
-    .filter((job) => job.match >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job)) && (state.retryQueue.includes(job.id) || (!state.pending.includes(job.id) && !state.discovered.includes(job.id))))
+    .filter((job) => job.match >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job)) && !pendingOffers.has(offerFingerprint(job)) && (state.retryQueue.includes(job.id) || (!state.pending.includes(job.id) && !state.discovered.includes(job.id))))
     .sort((a, b) => b.match - a.match)
     .slice(0, state.retryQueue.length ? 3 : 30);
   const cycleResults = [];
-  const matchCount = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job))).length;
+  const matchCount = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job)) && !pendingOffers.has(offerFingerprint(job))).length;
   await setLiveStatus({ phase: candidates.length ? 'Revisando ofertas compatibles' : 'Búsqueda en curso', jobsFound: jobs.length, matched: matchCount, currentJob: null, error: '' });
   if (!candidates.length) console.log(`Ciclo completo · ${matchCount} ofertas coinciden con tu perfil; ninguna nueva para revisar.`);
   else console.log(`Agente Postula · ${candidates.length} ofertas nuevas · ${matchCount} compatibles · encaje mínimo ${minimumMatch}% · máximo ${dailyLimit} envíos/día`);
@@ -401,6 +402,8 @@ async function discoverJobs(p) {
     discoverHimalayas(),
     discoverWeWorkRemotely(),
     discoverArbeitnow(),
+    discoverActiveVacancies(p),
+    discoverUxJobs(),
     ...boards.map(async (board) => {
       const response = await fetch(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs?content=true`);
       if (!response.ok) throw new Error(`Greenhouse ${board}: HTTP ${response.status}`);
@@ -569,7 +572,7 @@ async function discoverRemotive() {
 }
 
 async function discoverJobicy() {
-  const json = await cachedJson('jobicy', 'https://jobicy.com/api/jobs?count=200&geo=anywhere', 60 * 60 * 1000);
+  const json = await cachedJson('jobicy-v2', 'https://jobicy.com/api/jobs?count=100', 60 * 60 * 1000);
   return (json.jobs || []).map((job) => ({ id: `jobicy-${job.id}`, company: job.companyName || 'Empresa', role: job.jobTitle, url: job.url, applicationUrl: extractApplicationUrl(job.jobDescription || ''), location: job.jobGeo || 'Remoto', description: stripHtml(job.jobDescription || job.jobExcerpt || ''), source: 'Jobicy', remote: true }));
 }
 
@@ -594,8 +597,9 @@ async function discoverHimalayas() {
 
 async function discoverWeWorkRemotely() {
   const categories = ['remote-design-jobs', 'remote-product-jobs', 'remote-management-and-finance-jobs'];
-  const lists = await Promise.all(categories.map(async (category) => {
-    const xml = await cachedText(`wwr-${category}`, `https://weworkremotely.com/categories/${category}.rss`, 60 * 60 * 1000);
+  const urls = [...categories.map((category) => [`wwr-${category}`, `https://weworkremotely.com/categories/${category}.rss`]), ['wwr-all', 'https://weworkremotely.com/remote-jobs.rss']];
+  const lists = await Promise.all(urls.map(async ([key, url]) => {
+    const xml = await cachedText(key, url, 60 * 60 * 1000);
     return [...xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)].map(([, item]) => {
       const title = xmlValue(item, 'title');
       const separator = title.indexOf(':');
@@ -606,6 +610,30 @@ async function discoverWeWorkRemotely() {
     }).filter((job) => job.url && job.role);
   }));
   return lists.flat();
+}
+
+async function discoverActiveVacancies(p) {
+  const roles = [...new Set(String(p.roles || '').split(/[,;\n]+/).map((role) => role.trim()).filter(Boolean))].slice(0, 6);
+  const lists = await Promise.all(roles.map(async (role) => {
+    const url = `https://activevacancies.com/api/v1/jobs?${new URLSearchParams({ q: role, remote: 'remote', limit: '50', sort: 'recent' })}`;
+    const json = await cachedJson(`activevacancies-${role.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, url, 60 * 60 * 1000);
+    return (json.data || []).map((job) => ({
+      id: `activevacancies-${job.id}`, source: 'Active Vacancies', company: job.company?.name || 'Empresa', role: job.title,
+      url: job.applyUrl || job.url, listingUrl: job.url, applicationUrl: job.applyUrl || null,
+      location: job.location || '', workplaceType: job.remoteStatus || '', remote: job.remoteStatus === 'remote',
+      description: '', postedAt: job.postedAt || '',
+    }));
+  }));
+  return lists.flat();
+}
+
+async function discoverUxJobs() {
+  const json = await cachedJson('uxjobs-remote', 'https://jobs.uxjobs.io/api/export/partner/remote.json', 12 * 60 * 60 * 1000);
+  return (json.jobs || []).map((job) => ({
+    id: `uxjobs-${job.id}`, source: 'UX Jobs', company: job.company || 'Empresa', role: job.title,
+    url: job.url, location: [job.location, job.country_name].filter(Boolean).join(', '),
+    workplaceType: job.workplace || '', remote: job.remote === true, description: '', postedAt: job.posted_at || '',
+  }));
 }
 
 async function discoverArbeitnow() {
@@ -691,9 +719,12 @@ function inScope(job, p) {
   const hasProjectManagementMatch = seeksProjectManagement && /project manager|program manager/.test(title);
   if (targetRoles.length && !hasTitleMatch && !hasDesignMatch && !hasProjectManagementMatch) return false;
   const mode = String(p.mode || 'Indistinto').toLowerCase();
-  const remoteEvidence = `${job.location || ''} ${job.workplaceType || ''} ${job.type || ''} ${(job.tags || []).join(' ')}`;
-  if (mode.includes('remoto') && job.remote !== true && !/remote|remoto|anywhere|worldwide|distributed|work from home|telecommute/i.test(remoteEvidence)) return false;
-  if (mode.includes('remoto') && /north america only|u\.?s\.? only|united states only|canada only|europe only|uk only|must be based in (?:the )?(?:us|united states|north america)/i.test(text) && /argentina|buenos aires|latam|latin america/i.test(p.location || '')) return false;
+  const workEvidence = `${job.location || ''} ${job.workplaceType || ''} ${job.type || ''} ${job.remoteStatus || ''}`;
+  const remoteEvidence = `${workEvidence} ${(job.tags || []).join(' ')}`;
+  const remoteMode = mode.includes('remoto');
+  if (remoteMode && /\bhybrid\b|h[ií]brido/i.test(workEvidence)) return false;
+  if (remoteMode && job.remote !== true && !/remote|remoto|anywhere|worldwide|distributed|work from home|telecommute/i.test(remoteEvidence)) return false;
+  if (!locationFitsArgentina(job, p)) return false;
   if (mode.includes('híbrido') && !/hybrid|h[ií]brid/i.test(text)) return false;
   if (mode.includes('presencial')) {
     if (/remote|remoto|anywhere|worldwide/i.test(text)) return false;
@@ -701,6 +732,22 @@ function inScope(job, p) {
     if (place.length && !place.some((part) => text.includes(part))) return false;
   }
   return true;
+}
+
+function locationFitsArgentina(job, profile) {
+  const target = String(profile.location || '').toLowerCase();
+  if (!/argentina|buenos aires|la plata|latam|latin america|south america/i.test(target)) return true;
+  let location = String(job.location || '');
+  // An employer HQ is not necessarily where the remote employee must live.
+  location = location.replace(/\([^)]*\b(?:hq|headquarters|office)\b[^)]*\)/gi, ' ');
+  const normalizedLocation = location.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const globalOrArgentina = /\b(worldwide|anywhere|global|international|all countries|americas|latin america|latam|south america|argentina|buenos aires|la plata)\b/.test(normalizedLocation);
+  const restrictedRegion = /\b(united kingdom|uk only|britain|england|scotland|wales|london|manchester|edinburgh|cambridge,? uk|europe|european union|eu only|emea|north america|united states|u\.?s\.?|usa|canada|india|apac|australia|new zealand|singapore|japan|china|germany|france|spain|netherlands|ireland|switzerland|poland|portugal|mexico only|brazil only)\b/.test(normalizedLocation);
+  if (restrictedRegion && !globalOrArgentina) return false;
+
+  const description = String(job.description || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const explicitCountryLimit = /\b(?:must be|need to be|needs to be|only open to|only available to|candidates must|applicants must|based|located|reside|resident|authorized to work)[^.!?\n]{0,90}\b(?:united kingdom|uk|britain|england|united states|u\.?s\.?|usa|canada|north america|europe|emea|india|australia)\b|\b(?:united kingdom|uk|united states|u\.?s\.?|usa|canada|europe|emea)\s+only\b/.test(description);
+  return !explicitCountryLimit || globalOrArgentina;
 }
 
 function tailoredText(job, p) {
