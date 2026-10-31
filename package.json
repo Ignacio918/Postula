@@ -8,5 +8,8 @@
   },
   "dependencies": {
     "@neon/neon-js": "0.10.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
   }
 }

@@ -5,3 +5,4 @@ Thumbs.db
 .env.local
 config.js
 /dist/
+/node_modules/

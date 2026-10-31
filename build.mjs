@@ -1,4 +1,5 @@
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { build as bundle } from 'esbuild';
+import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 
 const authUrl = process.env.POSTULA_AUTH_URL || process.env.NEON_AUTH_BASE_URL || '';
 const dataApiUrl = process.env.POSTULA_DATA_API_URL || process.env.NEON_DATA_API_URL || '';
@@ -10,7 +11,8 @@ if (missing.length) {
 const config = `window.POSTULA_AUTH_URL = ${JSON.stringify(authUrl)};\nwindow.POSTULA_DATA_API_URL = ${JSON.stringify(dataApiUrl)};\n`;
 await writeFile('config.js', config, 'utf8');
 await mkdir('dist', { recursive: true });
-for (const file of ['index.html', 'styles.css', 'app.js', 'auth.js', 'config.js']) {
+await bundle({ entryPoints: ['app.js'], outfile: 'dist/app.js', bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'none' });
+for (const file of ['index.html', 'styles.css', 'config.js']) {
   await copyFile(file, `dist/${file}`);
 }
-console.log('Postula built into dist/.');
+console.log('Postula built into dist/ with the Neon SDK bundled locally.');

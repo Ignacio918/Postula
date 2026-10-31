@@ -73,14 +73,15 @@ Vercel **Deployment Protection → All Deployments** puede restringir producció
 Desde esta carpeta, ejecutá:
 
 ```powershell
-python -m http.server 8000
+npm run build
+python -m http.server 8000 --directory dist
 ```
 
 Después abrí <http://localhost:8000>. El servidor local evita restricciones que algunos navegadores aplican a llamadas de red desde `file://`.
 
 ## Tecnología
 
-HTML, CSS y JavaScript nativos; SDK oficial `@neon/neon-js` cargado como módulo ESM. La app estática requiere hosting HTTPS y acceso de red para Neon Auth/Data API.
+HTML, CSS y JavaScript nativos; el build incorpora el SDK oficial `@neon/neon-js` en el bundle local. La app estática requiere hosting HTTPS y acceso de red para Neon Auth/Data API.
 
 ## Licencia
 
