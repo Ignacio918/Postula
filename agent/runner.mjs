@@ -18,7 +18,14 @@ const workDir = path.join(root, '.postula-agent');
 const profileFile = path.resolve(input);
 const payload = JSON.parse(await readFile(profileFile, 'utf8'));
 const profile = payload.profile || {};
-const settings = payload.settings || payload;
+const settings = payload.settings && typeof payload.settings === 'object' && !Array.isArray(payload.settings)
+  ? { ...payload.settings }
+  : {
+      minimumMatch: payload.minimumMatch || payload.minimumMatchPercent || payload.autoThreshold || profile.autoThreshold,
+      dailyLimit: payload.dailyLimit || profile.dailyLimit,
+      intervalMinutes: payload.intervalMinutes,
+      browserHeadless: payload.browserHeadless,
+    };
 let minimumMatch = Number(settings.minimumMatch || settings.minimumMatchPercent || profile.autoThreshold || payload.autoThreshold || 80);
 let dailyLimit = Math.max(1, Math.min(20, Number(settings.dailyLimit || payload.dailyLimit || profile.dailyLimit || 5)));
 const stateFile = path.join(workDir, 'state.json');

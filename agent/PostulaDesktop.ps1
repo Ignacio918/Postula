@@ -284,7 +284,21 @@ function Start-PostulaAgent {
 function Invoke-PostulaApi([string]$Route, $Payload = $null) {
   $parameters = @{ Uri = "$($script:ApiBase)$Route"; Method = 'Post'; TimeoutSec = 60; ContentType = 'application/json' }
   if ($null -ne $Payload) { $parameters.Body = $Payload | ConvertTo-Json -Compress }
-  Invoke-RestMethod @parameters
+  try { return Invoke-RestMethod @parameters }
+  catch {
+    $response = $_.Exception.Response
+    if ($response) {
+      try {
+        $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+        $body = $reader.ReadToEnd(); $reader.Dispose()
+        if ($body) {
+          try { $detail = (ConvertFrom-Json $body).error } catch { $detail = $body }
+          if ($detail) { throw [System.InvalidOperationException]::new([string]$detail) }
+        }
+      } catch { if ($_.Exception -is [System.InvalidOperationException]) { throw } }
+    }
+    throw
+  }
 }
 
 function Add-ProfileField($Panel, [string]$Label, [string]$Value, [int]$Height = 38) {
@@ -318,7 +332,7 @@ function Show-ProfileDialog {
   $location = Add-ProfileField $form 'Ubicación' ($(if ($p.location) { [string]$p.location } else { 'Buenos Aires, Argentina' }))
   $mode = Add-ProfileField $form 'Modalidad' ($(if ($p.mode) { [string]$p.mode } else { 'Remoto' }))
   $minMatch = Add-ProfileField $form 'Encaje mínimo (%)' ([string]$(if ($saved.settings.minimumMatch) { $saved.settings.minimumMatch } else { 60 }))
-  $dailyLimit = Add-ProfileField $form 'Máximo de candidaturas automáticas por día' ([string]$(if ($saved.settings.dailyLimit) { $saved.settings.dailyLimit } else { 5 }))
+  $dailyLimit = Add-ProfileField $form 'Máximo diario de envíos (1 a 20)' ([string]$(if ($saved.settings.dailyLimit) { $saved.settings.dailyLimit } elseif ($p.dailyLimit) { $p.dailyLimit } else { 5 }))
   $cvHeading = New-Object System.Windows.Controls.TextBlock; $cvHeading.Text = 'CV · análisis local'; $cvHeading.FontSize = 16; $cvHeading.FontWeight = 'SemiBold'; $cvHeading.Foreground = $script:InkBrush; $cvHeading.Margin = '0,18,0,4'; [void]$form.Children.Add($cvHeading)
   $cvNote = New-Object System.Windows.Controls.TextBlock; $cvNote.Text = 'PDF o TXT · máximo 8 MB. El texto extraído se guarda en el archivo local de configuración y se usa para el ranking TF-IDF.'; $cvNote.FontSize = 12; $cvNote.Foreground = $script:MutedBrush; $cvNote.TextWrapping = 'Wrap'; [void]$form.Children.Add($cvNote)
   $cvRow = New-Object System.Windows.Controls.StackPanel; $cvRow.Orientation = 'Horizontal'; $cvRow.Margin = '0,10,0,3'; [void]$form.Children.Add($cvRow)
@@ -345,6 +359,10 @@ function Show-ProfileDialog {
   $save.Add_Click({
     $button = $save; $button.IsEnabled = $false; $button.Content = 'Guardando y buscando…'
     try {
+      $dailyLimitValue = 0
+      if (-not [int]::TryParse($dailyLimit.Text, [ref]$dailyLimitValue) -or $dailyLimitValue -lt 1 -or $dailyLimitValue -gt 20) { throw 'El máximo diario debe ser un número entre 1 y 20.' }
+      $minimumMatchValue = 0
+      if (-not [int]::TryParse($minMatch.Text, [ref]$minimumMatchValue) -or $minimumMatchValue -lt 30 -or $minimumMatchValue -gt 95) { throw 'El encaje mínimo debe estar entre 30 y 95.' }
       $profileData = @{
         name = $name.Text.Trim(); email = $email.Text.Trim(); phone = [string]$p.phone; location = $location.Text.Trim();
         roles = $roles.Text.Trim(); mode = $mode.Text.Trim(); resume = $resume.Text.Trim(); summary = $summary.Text.Trim();
@@ -352,7 +370,7 @@ function Show-ProfileDialog {
         salaryExpectation = [string]$p.salaryExpectation; workAuthorization = [string]$p.workAuthorization;
         applicationAnswers = $p.applicationAnswers
       }
-      $response = Invoke-PostulaApi '/api/configure' @{ profile = $profileData; minimumMatch = [int]$minMatch.Text; dailyLimit = [int]$dailyLimit.Text }
+      $response = Invoke-PostulaApi '/api/configure' @{ profile = $profileData; minimumMatch = $minimumMatchValue; dailyLimit = $dailyLimitValue }
       $dialog.Close()
       [System.Windows.MessageBox]::Show("Perfil guardado. El agente inició una búsqueda con $($response.minimumMatch)% de encaje mínimo. Los resultados aparecerán en esta ventana.", 'Postula') | Out-Null
     } catch { $button.IsEnabled = $true; $button.Content = 'Guardar y buscar ahora'; [System.Windows.MessageBox]::Show("Revisá los campos obligatorios y volvé a intentar:`n$($_.Exception.Message)", 'Postula', 'OK', 'Warning') | Out-Null }
