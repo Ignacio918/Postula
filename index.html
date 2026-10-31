@@ -18,7 +18,8 @@
     <form id="auth-form" class="auth-form">
       <label id="auth-name-wrap" hidden>Nombre<input id="auth-name" autocomplete="name" /></label>
       <label>Email<input id="auth-email" type="email" autocomplete="email" required /></label>
-      <label>Contraseña<input id="auth-password" type="password" autocomplete="current-password" minlength="8" required /></label>
+      <label id="auth-password-wrap">Contraseña<input id="auth-password" type="password" autocomplete="current-password" minlength="8" required /></label>
+      <label id="auth-code-wrap" hidden>Código de verificación<input id="auth-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" /></label>
       <p id="auth-error" class="auth-error" role="alert"></p>
       <button id="auth-submit" class="button button-primary" type="submit">Iniciar sesión</button>
     </form>
@@ -78,12 +79,17 @@
   window.POSTULA_AUTH_MODE = 'signin';
   document.querySelector('#auth-switch').addEventListener('click', event => {
     if (!event.target.closest('#auth-mode')) return;
-    const signup = window.POSTULA_AUTH_MODE !== 'signup';
+    const signup = window.POSTULA_AUTH_MODE === 'signin';
     window.POSTULA_AUTH_MODE = signup ? 'signup' : 'signin';
     document.querySelector('#auth-title').textContent = signup ? 'Creá tu cuenta.' : 'Entrá a Postula.';
     document.querySelector('#auth-copy').textContent = signup ? 'Un solo espacio para tu perfil y tus postulaciones.' : 'Tu perfil y tus postulaciones, disponibles desde tus dispositivos.';
     document.querySelector('#auth-submit').textContent = signup ? 'Crear cuenta' : 'Iniciar sesión';
     document.querySelector('#auth-name-wrap').hidden = !signup;
+    document.querySelector('#auth-password-wrap').hidden = false;
+    document.querySelector('#auth-password').required = true;
+    document.querySelector('#auth-code-wrap').hidden = true;
+    document.querySelector('#auth-code').required = false;
+    document.querySelector('#auth-email').readOnly = false;
     document.querySelector('#auth-password').autocomplete = signup ? 'new-password' : 'current-password';
     document.querySelector('#auth-switch').innerHTML = signup ? '¿Ya tenés cuenta? <button type="button" id="auth-mode">Iniciar sesión</button>' : '¿Primera vez? <button type="button" id="auth-mode">Crear cuenta</button>';
   });
