@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">Postula</title>
+  <rect width="256" height="256" rx="58" fill="#F4F3F1"/>
+  <g fill="#20211F">
+    <path d="M54 170 91 69c5-14 26-10 21 4L76 176c-5 14-27 9-22-6Z"/>
+    <path d="M103 170 140 69c5-14 26-10 21 4l-36 103c-5 14-27 9-22-6Z"/>
+    <path d="M152 170 189 69c5-14 26-10 21 4l-36 103c-5 14-27 9-22-6Z"/>
+  </g>
+  <circle cx="194" cy="187" r="11" fill="#648A69"/>
+</svg>

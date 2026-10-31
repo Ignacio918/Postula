@@ -23,7 +23,7 @@ npx playwright install chromium
 npm run agent -- "C:\Users\TU_USUARIO\Downloads\postula-agent-config.json"
 ```
 
-En Windows, guardá el JSON descargado como `.postula-agent\postula-agent-config.json` dentro del repo y abrí `INICIAR_AGENT.bat`. Se abre la app nativa **Postula · Agente de escritorio**. Muestra la búsqueda, las ofertas compatibles, los formularios listos, actividad y envíos confirmados. La ventana permite detener el agente, enfocar un formulario y confirmar cada envío. Chromium aparece solo para los portales de empleo; el panel de control no es una página web y escucha únicamente en `127.0.0.1` para comunicarse con el proceso local.
+En Windows, guardá el JSON descargado como `.postula-agent\postula-agent-config.json` dentro del repo y abrí `INICIAR_AGENT.bat`. Se abre la app nativa **Postula · Agente de escritorio**. Muestra la búsqueda, las ofertas compatibles, los formularios listos, actividad y envíos confirmados. La ventana permite detener el agente, enfocar un formulario y confirmar cada envío. Chromium aparece solo para los portales de empleo; el panel de control no es una página web y escucha únicamente en `127.0.0.1` para comunicarse con el proceso local. El ícono de Postula está en `assets/`; también podés usar el acceso directo del escritorio, que apunta a tu copia local.
 
 El agente abre Chromium visible y consulta las fuentes cada 30 minutos mientras la ventana de escritorio siga abierta. En el primer uso, el navegador crea `.postula-agent/browser-profile`; iniciá sesión allí directamente en los portales donde tengas cuenta. Las contraseñas no se guardan en Postula ni en el JSON; las cookies quedan en ese perfil local del navegador.
 

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 286 84" role="img" aria-labelledby="title">
+  <title id="title">Postula</title>
+  <g fill="#20211F">
+    <path d="M7 57 20 20c2-6 11-4 9 2L16 59c-2 5-11 4-9-2Z"/>
+    <path d="M21 57 34 20c2-6 11-4 9 2L30 59c-2 5-11 4-9-2Z"/>
+    <path d="M35 57 48 20c2-6 11-4 9 2L44 59c-2 5-11 4-9-2Z"/>
+  </g>
+  <text x="72" y="58" fill="#20211F" font-family="Segoe UI, Arial, sans-serif" font-size="39" font-weight="700" letter-spacing="-1.8">postula</text>
+  <circle cx="219" cy="51" r="4.5" fill="#648A69"/>
+</svg>

@@ -42,6 +42,7 @@ $xamlText = @'
       <Grid Margin="28,0">
         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <Image x:Name="BrandIcon" Width="29" Height="29" Margin="0,0,9,0"/>
           <TextBlock Text="postula." FontSize="20" FontWeight="Bold" Foreground="#171715" VerticalAlignment="Center"/>
           <Border Width="1" Height="22" Background="#DCDAD6" Margin="14,0"/>
           <TextBlock Text="AGENTE DE ESCRITORIO" FontSize="11" Foreground="#5F5D59" VerticalAlignment="Center"/>
@@ -133,6 +134,13 @@ if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
 [xml]$xaml = $xamlText
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
+$iconPath = Join-Path $script:RepoRoot 'assets\postula-icon.ico'
+if (Test-Path -LiteralPath $iconPath) {
+  $iconUri = New-Object System.Uri($iconPath)
+  $iconFrame = [System.Windows.Media.Imaging.BitmapFrame]::Create($iconUri)
+  $window.Icon = $iconFrame
+  $window.FindName('BrandIcon').Source = $iconFrame
+}
 $script:ConnectionDot = $window.FindName('ConnectionDot')
 $script:ConnectionLabel = $window.FindName('ConnectionLabel')
 $script:UpdatedLabel = $window.FindName('UpdatedLabel')
