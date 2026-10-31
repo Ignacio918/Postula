@@ -404,6 +404,7 @@ async function discoverJobs(p) {
     discoverArbeitnow(),
     discoverActiveVacancies(p),
     discoverUxJobs(),
+    discoverPythonScrape(p),
     ...boards.map(async (board) => {
       const response = await fetch(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs?content=true`);
       if (!response.ok) throw new Error(`Greenhouse ${board}: HTTP ${response.status}`);
@@ -426,6 +427,25 @@ async function discoverJobs(p) {
   if (!jobs.length) throw new Error('Ninguna fuente respondió.');
   const keyText = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
   return [...new Map(jobs.filter((job) => job.url).map((job) => [`${keyText(job.company)}|${keyText(job.role)}`, job])).values()];
+}
+
+async function discoverPythonScrape(p) {
+  const script = path.join(root, 'agent', 'public_scraper.py');
+  const input = JSON.stringify({ roles: p.roles || '' });
+  for (const [command, prefix] of [['python', []], ['py', ['-3']]]) {
+    try {
+      const { stdout } = await execFileAsync(command, [...prefix, script, input], { timeout: 45000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
+      const jobs = JSON.parse(stdout);
+      console.log(`Scraper Python: ${Array.isArray(jobs) ? jobs.length : 0} avisos públicos revisados.`);
+      return Array.isArray(jobs) ? jobs : [];
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      console.warn(`Scraper Python omitido: ${error.message || error}`);
+      return [];
+    }
+  }
+  console.warn('Python no está instalado; continúan activos los feeds gratuitos del agente.');
+  return [];
 }
 
 async function discoverWebSearch(p) {
