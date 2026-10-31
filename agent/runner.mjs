@@ -116,15 +116,18 @@ while (keepRunning) {
     .filter((job) => inScope(job, profile))
     .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
     .filter((job) => job.match >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job)) && !pendingOffers.has(offerFingerprint(job)) && (state.retryQueue.includes(job.id) || (!state.pending.includes(job.id) && !state.discovered.includes(job.id))))
-    .sort((a, b) => b.match - a.match)
+    .sort((a, b) => regionPriority(a, profile) - regionPriority(b, profile) || b.match - a.match)
     .slice(0, state.retryQueue.length ? 3 : 30);
   const cycleResults = [];
   const matchCount = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job)) && !pendingOffers.has(offerFingerprint(job))).length;
-  const matches = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch).map((job) => ({
+  const matches = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch)
+    .sort((a, b) => regionPriority(a, profile) - regionPriority(b, profile) || Number(b.score ?? scoreJob(b, profile)) - Number(a.score ?? scoreJob(a, profile)))
+    .map((job) => ({
     id: job.id, role: job.role, company: job.company, source: job.source || 'Fuente pública',
     location: job.location || 'Remoto · alcance a confirmar', match: Number(job.score ?? scoreJob(job, profile)),
+    region: regionLabel(job, profile),
     url: job.applicationUrl || job.applyUrl || job.url,
-  })).sort((a, b) => b.match - a.match).slice(0, 60);
+  })).slice(0, 60);
   await setLiveStatus({ phase: candidates.length ? 'Revisando ofertas compatibles' : 'Búsqueda en curso', jobsFound: jobs.length, matched: matchCount, matches, currentJob: null, error: '' });
   if (!candidates.length) console.log(`Ciclo completo · ${matchCount} ofertas coinciden con tu perfil; ninguna nueva para revisar.`);
   else console.log(`Agente Postula · ${candidates.length} ofertas nuevas · ${matchCount} compatibles · encaje mínimo ${minimumMatch}% · máximo ${dailyLimit} envíos/día`);
@@ -397,7 +400,7 @@ async function startDashboard() {
         const body = await readRequestJson(request, 512 * 1024);
         const incoming = body.profile || {};
         const nextProfile = { ...profile };
-        for (const key of ['name', 'email', 'phone', 'location', 'roles', 'mode', 'resume', 'summary', 'experience', 'skills', 'link', 'salaryExpectation', 'workAuthorization']) {
+        for (const key of ['name', 'email', 'phone', 'location', 'roles', 'mode', 'resume', 'summary', 'experience', 'skills', 'link', 'salaryExpectation', 'workAuthorization', 'regionPreference']) {
           if (typeof incoming[key] === 'string') nextProfile[key] = incoming[key].slice(0, key === 'resume' || key === 'experience' ? 250000 : 4000).trim();
         }
         nextProfile.mode ||= 'Remoto';
@@ -868,6 +871,7 @@ function inScope(job, p) {
   if (remoteMode && /\bhybrid\b|h[ií]brido/i.test(workEvidence)) return false;
   if (remoteMode && job.remote !== true && !/remote|remoto|anywhere|worldwide|distributed|work from home|telecommute/i.test(remoteEvidence)) return false;
   if (!locationFitsArgentina(job, p)) return false;
+  if (p.regionPreference === 'regional-only' && regionPriority(job, p) > 1) return false;
   if (mode.includes('híbrido') && !/hybrid|h[ií]brid/i.test(text)) return false;
   if (mode.includes('presencial')) {
     if (/remote|remoto|anywhere|worldwide/i.test(text)) return false;
@@ -875,6 +879,22 @@ function inScope(job, p) {
     if (place.length && !place.some((part) => text.includes(part))) return false;
   }
   return true;
+}
+
+function regionPriority(job, profile) {
+  if (profile.regionPreference === 'balanced') return 0;
+  const location = String(job.location || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const description = String(job.description || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const evidence = `${location} ${description}`;
+  if (/\b(argentina|argentinian|buenos aires|la plata)\b/.test(location) || /\b(?:based in|located in|candidates in|applicants in|hiring in)\b[^.!?]{0,60}\b(?:argentina|buenos aires|la plata)\b/.test(description)) return 0;
+  if (/\b(latam|latin america|south america|americas|mexico|brazil|chile|colombia|uruguay|peru|ecuador|paraguay|bolivia|costa rica|panama|guatemala|dominican republic)\b/.test(location) || /\b(?:based in|located in|candidates in|applicants in|hiring in)\b[^.!?]{0,80}\b(?:latam|latin america|south america|americas|mexico|brazil|chile|colombia|uruguay|peru|ecuador)\b/.test(description)) return 1;
+  if (/\b(americas|worldwide|anywhere|global|international|all countries|remote)\b/.test(location) || job.remote === true || /\b(remote|remoto|worldwide|anywhere|global)\b/.test(evidence)) return 2;
+  return 2;
+}
+
+function regionLabel(job, profile) {
+  const priority = regionPriority(job, profile);
+  return priority === 0 ? 'Argentina' : priority === 1 ? 'LATAM' : 'Remoto global';
 }
 
 function locationFitsArgentina(job, profile) {
@@ -890,7 +910,7 @@ function locationFitsArgentina(job, profile) {
 
   const description = String(job.description || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const explicitCountryLimit = /\b(?:must be|need to be|needs to be|only open to|only available to|candidates must|applicants must|based|located|reside|resident|authorized to work)[^.!?\n]{0,90}\b(?:united kingdom|uk|britain|england|united states|u\.?s\.?|usa|canada|north america|europe|emea|india|australia)\b|\b(?:united kingdom|uk|united states|u\.?s\.?|usa|canada|europe|emea)\s+only\b/.test(description);
-  return !explicitCountryLimit || globalOrArgentina;
+  return !explicitCountryLimit;
 }
 
 function tailoredText(job, p) {

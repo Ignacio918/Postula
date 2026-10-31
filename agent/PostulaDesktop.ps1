@@ -334,6 +334,10 @@ function Show-ProfileDialog {
   $roles = Add-ProfileField $form 'Puestos (separados por coma)' ([string]$p.roles)
   $location = Add-ProfileField $form 'Ubicación' ($(if ($p.location) { [string]$p.location } else { 'Buenos Aires, Argentina' }))
   $mode = Add-ProfileField $form 'Modalidad' ($(if ($p.mode) { [string]$p.mode } else { 'Remoto' }))
+  $regionCaption = New-Object System.Windows.Controls.TextBlock; $regionCaption.Text = 'Prioridad geográfica'; $regionCaption.FontSize = 12; $regionCaption.Foreground = $script:MutedBrush; $regionCaption.Margin = '0,10,0,5'; [void]$form.Children.Add($regionCaption)
+  $region = New-Object System.Windows.Controls.ComboBox; $region.Height = 38; $region.FontSize = 13; $region.Padding = '8,5'; [void]$region.Items.Add('Argentina → LATAM → remoto global'); [void]$region.Items.Add('Solo Argentina y LATAM'); [void]$region.Items.Add('Sin prioridad geográfica')
+  $region.SelectedIndex = switch ([string]$p.regionPreference) { 'regional-only' { 1 } 'balanced' { 2 } default { 0 } }; [void]$form.Children.Add($region)
+  $regionNote = New-Object System.Windows.Controls.TextBlock; $regionNote.Text = 'Primero se considera la región y luego el encaje con tu CV. El puntaje mide coincidencia de texto, no probabilidad de contratación.'; $regionNote.FontSize = 11; $regionNote.Foreground = $script:MutedBrush; $regionNote.Margin = '0,4,0,0'; $regionNote.TextWrapping = 'Wrap'; [void]$form.Children.Add($regionNote)
   $minMatch = Add-ProfileField $form 'Encaje mínimo (%)' ([string]$(if ($saved.settings.minimumMatch) { $saved.settings.minimumMatch } else { 60 }))
   $interval = Add-ProfileField $form 'Revisar ofertas cada (minutos, desde 1)' ([string]$(if ($saved.settings.intervalMinutes) { $saved.settings.intervalMinutes } else { 30 }))
   $searchNote = New-Object System.Windows.Controls.TextBlock; $searchNote.Text = 'La frecuencia controla los ciclos de revisión. Las fuentes externas usan caché y sus propios ritmos para evitar consultas repetidas.'; $searchNote.FontSize = 11; $searchNote.Foreground = $script:MutedBrush; $searchNote.TextWrapping = 'Wrap'; [void]$form.Children.Add($searchNote)
@@ -375,6 +379,7 @@ function Show-ProfileDialog {
         roles = $roles.Text.Trim(); mode = $mode.Text.Trim(); resume = $resume.Text.Trim(); summary = $summary.Text.Trim();
         experience = [string]$p.experience; skills = $skills.Text.Trim(); link = [string]$p.link;
         salaryExpectation = [string]$p.salaryExpectation; workAuthorization = [string]$p.workAuthorization;
+        regionPreference = @('regional-first', 'regional-only', 'balanced')[[int]$region.SelectedIndex];
         applicationAnswers = $p.applicationAnswers
       }
       $response = Invoke-PostulaApi '/api/configure' @{ profile = $profileData; minimumMatch = $minimumMatchValue; dailyLimit = $dailyLimitValue; intervalMinutes = $intervalValue }
@@ -463,7 +468,7 @@ function Render-Matches($items) {
     $details = New-Object System.Windows.Controls.StackPanel
     $role = New-Object System.Windows.Controls.TextBlock; $role.Text = [string]$item.role; $role.FontSize = 13; $role.FontWeight = 'SemiBold'; $role.Foreground = $script:InkBrush; $role.TextWrapping = 'Wrap'
     $company = New-Object System.Windows.Controls.TextBlock; $company.Text = "$($item.company) · $($item.source)"; $company.FontSize = 11; $company.Foreground = $script:MutedBrush; $company.Margin = '0,2,0,0'
-    $meta = New-Object System.Windows.Controls.TextBlock; $meta.Text = "$($item.location) · $($item.match)% encaje"; $meta.FontSize = 11; $meta.Foreground = $script:MutedBrush; $meta.Margin = '0,2,0,0'; $meta.TextWrapping = 'Wrap'
+    $meta = New-Object System.Windows.Controls.TextBlock; $meta.Text = "$($item.region) · $($item.location) · $($item.match)% encaje"; $meta.FontSize = 11; $meta.Foreground = $script:MutedBrush; $meta.Margin = '0,2,0,0'; $meta.TextWrapping = 'Wrap'
     [void]$details.Children.Add($role); [void]$details.Children.Add($company); [void]$details.Children.Add($meta); [void]$grid.Children.Add($details)
     $open = New-Object System.Windows.Controls.Button; $open.Content = 'Abrir oferta ↗'; $open.FontSize = 11; $open.Padding = '9,4'; $open.Margin = '10,0,0,0'; $open.VerticalAlignment = 'Center'
     $open.Add_Click({
