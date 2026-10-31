@@ -17,6 +17,7 @@ const profile = payload.profile || {};
 const settings = payload.settings || payload;
 const minimumMatch = Number(settings.minimumMatch || payload.autoThreshold || 80);
 const dailyLimit = Math.max(1, Math.min(20, Number(settings.dailyLimit || payload.dailyLimit || 5)));
+const autoSubmit = settings.autoSubmit === true;
 const stateFile = path.join(workDir, 'state.json');
 const resultFile = path.join(workDir, 'results.json');
 const state = await readJson(stateFile, { applied: [], attempted: [], date: '', submittedToday: 0, attemptedToday: 0 });
@@ -27,7 +28,7 @@ for (const application of payload.applications || []) {
   if (application.jobId && ['Enviada', 'Entrevista', 'Seguimiento'].includes(application.status) && !state.applied.includes(application.jobId)) state.applied.push(application.jobId);
 }
 const isBatch = Array.isArray(payload.jobs) && payload.jobs.length > 0;
-const intervalMinutes = Math.max(15, Math.min(1440, Number(settings.intervalMinutes || 60)));
+const intervalMinutes = Math.max(15, Math.min(1440, Number(settings.intervalMinutes || 30)));
 const stop = new Set('the and for with from that this your you our are can will have has into about role work team experience design designer product user users their they them as an a to of in on or is be we it by at across using use years strong ability skills what who all not'.split(' '));
 
 if (!profile.name || !profile.email || !profile.roles || !(profile.resume || profile.experience)) {
@@ -65,10 +66,10 @@ while (keepRunning) {
   const results = previousResults.results || [];
   const cycleResults = [];
   if (!candidates.length) console.log(`Sin ofertas nuevas por encima de ${minimumMatch}%.`);
-  else console.log(`Agente Postula · ${candidates.length} candidaturas · encaje mínimo ${minimumMatch}% · máximo diario ${dailyLimit}`);
+  else console.log(`Agente Postula · ${candidates.length} ofertas compatibles para revisar · encaje mínimo ${minimumMatch}% · tope diario ${dailyLimit}`);
 
   for (const job of candidates) {
-  const result = { jobId: job.id, company: job.company, role: job.role, url: job.url, match: job.match, at: new Date().toISOString() };
+  const result = { jobId: job.id, source: job.source, company: job.company, role: job.role, url: job.url, match: job.match, at: new Date().toISOString() };
   let page;
   try {
     page = await context.newPage();
@@ -97,7 +98,8 @@ while (keepRunning) {
           result.status = 'needs_attention';
           result.reason = 'No pude identificar un único botón de envío seguro.';
         } else {
-          const approved = await confirmSubmission(job);
+          if (autoSubmit) console.log(`Formulario completo y datos respaldados por el perfil; envío automático activado para ${job.company} · ${job.role}.`);
+          const approved = autoSubmit || await confirmSubmission(job);
           if (!approved) {
             result.status = 'needs_attention';
             result.reason = 'Formulario completo; falta confirmación manual para enviar la postulación.';
@@ -136,7 +138,7 @@ while (keepRunning) {
   cycleResults.push(result);
   await writeFile(stateFile, JSON.stringify(state, null, 2));
   await writeFile(resultFile, JSON.stringify({ date: today, results }, null, 2));
-  console.log(`${result.status.padEnd(22)} ${job.company} · ${job.role}${result.reason ? ` — ${result.reason}` : ''}`);
+  console.log(`${result.status.padEnd(22)} [${job.source || 'bolsa'}] ${job.company} · ${job.role}${result.reason ? ` — ${result.reason}` : ''}`);
     if (page && result.status !== 'needs_attention' && result.status !== 'submitted_unconfirmed') await page.close().catch(() => {});
   }
   if (cycleResults.some((result) => ['needs_attention', 'submitted_unconfirmed'].includes(result.status))) {
@@ -187,6 +189,9 @@ async function discoverJobs(p) {
   const lists = await Promise.allSettled([
     discoverRemotive(),
     discoverJobicy(),
+    discoverRemoteOk(),
+    discoverHimalayas(),
+    discoverWeWorkRemotely(),
     ...boards.map(async (board) => {
       const response = await fetch(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs?content=true`);
       if (!response.ok) throw new Error(`Greenhouse ${board}: HTTP ${response.status}`);
@@ -206,21 +211,77 @@ async function discoverJobs(p) {
     else console.warn(`Fuente no disponible: ${result.reason?.message || result.reason}`);
   }
   if (!jobs.length) throw new Error('Ninguna fuente respondió.');
-  return [...new Map(jobs.filter((job) => job.url).map((job) => [job.id, job])).values()];
+  const keyText = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+  return [...new Map(jobs.filter((job) => job.url).map((job) => [`${keyText(job.company)}|${keyText(job.role)}`, job])).values()];
 }
 
 async function discoverRemotive() {
-  const response = await fetch('https://remotive.com/api/remote-jobs', { headers: { Accept: 'application/json' } });
-  if (!response.ok) throw new Error(`Remotive: HTTP ${response.status}`);
-  const json = await response.json();
-  return (json.jobs || []).map((job) => ({ id: `remotive-${job.id}`, company: job.company_name || 'Empresa', role: job.title, url: job.url, location: job.candidate_required_location || 'Remoto', description: stripHtml(job.description || ''), source: 'Remotive' }));
+  const json = await cachedJson('remotive', 'https://remotive.com/api/remote-jobs', 6 * 60 * 60 * 1000);
+  return (json.jobs || []).map((job) => ({ id: `remotive-${job.id}`, company: job.company_name || 'Empresa', role: job.title, url: job.url, location: job.candidate_required_location || 'Remoto', description: stripHtml(job.description || ''), source: 'Remotive', remote: true }));
 }
 
 async function discoverJobicy() {
-  const response = await fetch('https://jobicy.com/api/jobs?count=200&geo=anywhere', { headers: { Accept: 'application/json' } });
-  if (!response.ok) throw new Error(`Jobicy: HTTP ${response.status}`);
-  const json = await response.json();
-  return (json.jobs || []).map((job) => ({ id: `jobicy-${job.id}`, company: job.companyName || 'Empresa', role: job.jobTitle, url: job.url, location: job.jobGeo || 'Remoto', description: stripHtml(job.jobDescription || job.jobExcerpt || ''), source: 'Jobicy' }));
+  const json = await cachedJson('jobicy', 'https://jobicy.com/api/jobs?count=200&geo=anywhere', 60 * 60 * 1000);
+  return (json.jobs || []).map((job) => ({ id: `jobicy-${job.id}`, company: job.companyName || 'Empresa', role: job.jobTitle, url: job.url, location: job.jobGeo || 'Remoto', description: stripHtml(job.jobDescription || job.jobExcerpt || ''), source: 'Jobicy', remote: true }));
+}
+
+async function discoverRemoteOk() {
+  const jobs = await cachedJson('remoteok', 'https://remoteok.com/api', 60 * 60 * 1000);
+  return (Array.isArray(jobs) ? jobs : []).filter((job) => job.id && job.position).map((job) => ({ id: `remoteok-${job.id}`, company: job.company || 'Empresa', role: job.position, url: job.apply_url || job.url, location: job.location || 'Remoto', description: stripHtml(job.description || ''), source: 'Remote OK', remote: true }));
+}
+
+async function discoverHimalayas() {
+  const terms = ['product designer', 'design engineer', 'project manager'];
+  const lists = await Promise.all(terms.map(async (term) => {
+    const url = `https://himalayas.app/jobs/api/search?${new URLSearchParams({ q: term, worldwide: 'true', sort: 'recent', page: '1' })}`;
+    const json = await cachedJson(`himalayas-${term.replace(/\s+/g, '-')}`, url, 24 * 60 * 60 * 1000);
+    return (json.jobs || []).filter((job) => !job.expiryDate || Number(job.expiryDate) * 1000 > Date.now()).map((job) => ({ id: `himalayas-${job.guid}`, source: 'Himalayas', company: job.companyName || 'Empresa', role: job.title, url: job.applicationLink, listingUrl: `https://himalayas.app/jobs/${encodeURIComponent(job.companySlug || '')}/${encodeURIComponent(job.guid || '')}`, location: (job.locationRestrictions || []).join(', ') || 'Remoto', description: stripHtml(job.description || job.excerpt || ''), remote: true }));
+  }));
+  return lists.flat();
+}
+
+async function discoverWeWorkRemotely() {
+  const categories = ['remote-design-jobs', 'remote-product-jobs', 'remote-management-and-finance-jobs'];
+  const lists = await Promise.all(categories.map(async (category) => {
+    const xml = await cachedText(`wwr-${category}`, `https://weworkremotely.com/categories/${category}.rss`, 60 * 60 * 1000);
+    return [...xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)].map(([, item]) => {
+      const title = xmlValue(item, 'title');
+      const separator = title.indexOf(':');
+      const company = separator > 0 ? title.slice(0, separator).trim() : 'Empresa';
+      const role = separator > 0 ? title.slice(separator + 1).trim() : title;
+      return { id: `wwr-${xmlValue(item, 'guid') || xmlValue(item, 'link')}`, source: 'We Work Remotely', company, role, url: xmlValue(item, 'link'), location: 'Remoto', description: stripHtml(xmlValue(item, 'description')), remote: true };
+    }).filter((job) => job.url && job.role);
+  }));
+  return lists.flat();
+}
+
+async function cachedJson(key, url, maxAgeMs) {
+  const file = path.join(workDir, 'cache', `${key}.json`);
+  const cached = await readJson(file, null);
+  if (cached?.fetchedAt && Date.now() - cached.fetchedAt < maxAgeMs) return cached.data;
+  const response = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'Postula job search' } });
+  if (!response.ok) throw new Error(`${key}: HTTP ${response.status}`);
+  const data = await response.json();
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify({ fetchedAt: Date.now(), data }));
+  return data;
+}
+
+async function cachedText(key, url, maxAgeMs) {
+  const file = path.join(workDir, 'cache', `${key}.json`);
+  const cached = await readJson(file, null);
+  if (cached?.fetchedAt && Date.now() - cached.fetchedAt < maxAgeMs) return cached.data;
+  const response = await fetch(url, { headers: { Accept: 'application/rss+xml, application/xml, text/xml', 'User-Agent': 'Postula job search' } });
+  if (!response.ok) throw new Error(`${key}: HTTP ${response.status}`);
+  const data = await response.text();
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify({ fetchedAt: Date.now(), data }));
+  return data;
+}
+
+function xmlValue(xml, name) {
+  const match = xml.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${name}>`, 'i'));
+  return (match?.[1] || '').replace(/^<!\[CDATA\[/, '').replace(/\]\]>$/, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").trim();
 }
 
 function label(value) { return value.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()); }
@@ -253,7 +314,7 @@ function inScope(job, p) {
   const hasProjectManagementMatch = seeksProjectManagement && /project manager|program manager/.test(title);
   if (targetRoles.length && !hasTitleMatch && !hasDesignMatch && !hasProjectManagementMatch) return false;
   const mode = String(p.mode || 'Indistinto').toLowerCase();
-  if (mode.includes('remoto') && !/remote|remoto|anywhere|worldwide|distributed|latam|latin america|americas|global/i.test(text)) return false;
+  if (mode.includes('remoto') && job.remote !== true && !/remote|remoto|anywhere|worldwide|distributed|latam|latin america|americas|global/i.test(text)) return false;
   if (mode.includes('remoto') && /north america only|u\.?s\.? only|united states only|canada only|europe only|uk only|must be based in (?:the )?(?:us|united states|north america)/i.test(text) && /argentina|buenos aires|latam|latin america/i.test(p.location || '')) return false;
   if (mode.includes('híbrido') && !/hybrid|h[ií]brid/i.test(text)) return false;
   if (mode.includes('presencial')) {
