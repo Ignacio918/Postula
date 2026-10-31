@@ -9,6 +9,90 @@ $script:AgentProcess = $null
 $script:OwnsAgent = $false
 $script:LastData = $null
 
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public struct PostulaWindowPropertyKey {
+  public Guid FormatId;
+  public uint PropertyId;
+}
+
+[StructLayout(LayoutKind.Explicit, Size = 24)]
+public struct PostulaWindowPropVariant {
+  [FieldOffset(0)] public ushort VariantType;
+  [FieldOffset(8)] public IntPtr Pointer;
+}
+
+[ComImport]
+[Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
+[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface PostulaWindowPropertyStore {
+  [PreserveSig] int GetCount(out uint count);
+  [PreserveSig] int GetAt(uint index, out PostulaWindowPropertyKey key);
+  [PreserveSig] int GetValue(ref PostulaWindowPropertyKey key, out PostulaWindowPropVariant value);
+  [PreserveSig] int SetValue(ref PostulaWindowPropertyKey key, ref PostulaWindowPropVariant value);
+  [PreserveSig] int Commit();
+}
+
+public static class PostulaTaskbarIdentity {
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+  public static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+
+  [DllImport("shell32.dll", PreserveSig = true)]
+  private static extern int SHGetPropertyStoreForWindow(IntPtr window, ref Guid iid, out PostulaWindowPropertyStore store);
+
+  [DllImport("ole32.dll", PreserveSig = true)]
+  private static extern int PropVariantClear(ref PostulaWindowPropVariant value);
+
+  public static void SetWindowAppUserModelID(IntPtr window, string appId) {
+    Guid iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+    PostulaWindowPropertyStore store;
+    int result = SHGetPropertyStoreForWindow(window, ref iid, out store);
+    if (result < 0) Marshal.ThrowExceptionForHR(result);
+    PostulaWindowPropertyKey key = new PostulaWindowPropertyKey {
+      FormatId = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"),
+      PropertyId = 5
+    };
+    PostulaWindowPropVariant value = new PostulaWindowPropVariant {
+      VariantType = 31,
+      Pointer = Marshal.StringToCoTaskMemUni(appId)
+    };
+    try {
+      result = store.SetValue(ref key, ref value);
+      if (result < 0) Marshal.ThrowExceptionForHR(result);
+      result = store.Commit();
+      if (result < 0) Marshal.ThrowExceptionForHR(result);
+    } finally {
+      PropVariantClear(ref value);
+      Marshal.ReleaseComObject(store);
+    }
+  }
+
+  public static string GetWindowAppUserModelID(IntPtr window) {
+    Guid iid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+    PostulaWindowPropertyStore store;
+    int result = SHGetPropertyStoreForWindow(window, ref iid, out store);
+    if (result < 0) Marshal.ThrowExceptionForHR(result);
+    PostulaWindowPropertyKey key = new PostulaWindowPropertyKey {
+      FormatId = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"),
+      PropertyId = 5
+    };
+    PostulaWindowPropVariant value;
+    try {
+      result = store.GetValue(ref key, out value);
+      if (result < 0) Marshal.ThrowExceptionForHR(result);
+      try { return value.VariantType == 31 ? Marshal.PtrToStringUni(value.Pointer) : null; }
+      finally { PropVariantClear(ref value); }
+    } finally {
+      Marshal.ReleaseComObject(store);
+    }
+  }
+}
+'@
+[void][PostulaTaskbarIdentity]::SetCurrentProcessExplicitAppUserModelID('Ignacio.Postula.Desktop')
+
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
 
 $xamlText = @'
@@ -134,6 +218,13 @@ if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
 [xml]$xaml = $xamlText
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
+$window.Add_SourceInitialized({
+  $windowHandle = (New-Object System.Windows.Interop.WindowInteropHelper($window)).Handle
+  [PostulaTaskbarIdentity]::SetWindowAppUserModelID($windowHandle, 'Ignacio.Postula.Desktop')
+  if ([PostulaTaskbarIdentity]::GetWindowAppUserModelID($windowHandle) -ne 'Ignacio.Postula.Desktop') {
+    throw 'Windows did not assign Postula taskbar identity to the desktop window.'
+  }
+})
 $iconPath = Join-Path $script:RepoRoot 'assets\postula-icon.ico'
 if (Test-Path -LiteralPath $iconPath) {
   $iconUri = New-Object System.Uri($iconPath)
