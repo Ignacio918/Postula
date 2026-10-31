@@ -28,6 +28,7 @@ for (const application of payload.applications || []) {
 }
 const isBatch = Array.isArray(payload.jobs) && payload.jobs.length > 0;
 const intervalMinutes = Math.max(15, Math.min(1440, Number(settings.intervalMinutes || 60)));
+const stop = new Set('the and for with from that this your you our are can will have has into about role work team experience design designer product user users their they them as an a to of in on or is be we it by at across using use years strong ability skills what who all not'.split(' '));
 
 if (!profile.name || !profile.email || !profile.roles || !(profile.resume || profile.experience) || !(profile.greenhouse || profile.lever)) {
   console.error('Faltan nombre, email, puestos objetivo o contenido de CV en la configuración de Postula.');
@@ -92,21 +93,27 @@ while (keepRunning) {
           result.status = 'needs_attention';
           result.reason = 'No pude identificar un único botón de envío seguro.';
         } else {
-          state.attempted.push(job.id);
-          state.attemptedToday += 1;
-          await writeFile(stateFile, JSON.stringify(state, null, 2));
-          await submit.first().click({ timeout: 10000 });
-          await page.waitForTimeout(2500);
-          if (await hasBlocker(page)) {
+          const approved = await confirmSubmission(job);
+          if (!approved) {
             result.status = 'needs_attention';
-            result.reason = 'El portal pidió una verificación antes de confirmar el envío.';
-          } else if (await hasConfirmation(page)) {
-            result.status = 'submitted';
-            state.applied.push(job.id);
-            state.submittedToday += 1;
+            result.reason = 'Formulario completo; falta confirmación manual para enviar la postulación.';
           } else {
-            result.status = 'submitted_unconfirmed';
-            result.reason = 'Se envió el formulario, pero el portal no mostró una confirmación reconocible. Revisá la página abierta.';
+            state.attempted.push(job.id);
+            state.attemptedToday += 1;
+            await writeFile(stateFile, JSON.stringify(state, null, 2));
+            await submit.first().click({ timeout: 10000 });
+            await page.waitForTimeout(2500);
+            if (await hasBlocker(page)) {
+              result.status = 'needs_attention';
+              result.reason = 'El portal pidió una verificación antes de confirmar el envío.';
+            } else if (await hasConfirmation(page)) {
+              result.status = 'submitted';
+              state.applied.push(job.id);
+              state.submittedToday += 1;
+            } else {
+              result.status = 'submitted_unconfirmed';
+              result.reason = 'Se envió el formulario, pero el portal no mostró una confirmación reconocible. Revisá la página abierta.';
+            }
           }
         }
       }
@@ -148,6 +155,22 @@ async function readJson(file, fallback) {
 async function wait(minutes) { await new Promise((resolve) => setTimeout(resolve, minutes * 60 * 1000)); }
 function localDate() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 
+async function confirmSubmission(job) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.log(`Confirmación manual requerida antes de enviar: ${job.company} · ${job.role}`);
+    return false;
+  }
+  const { createInterface } = await import('node:readline/promises');
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    console.log(`\nFormulario completo: ${job.company} · ${job.role}`);
+    console.log(`Revisalo en el navegador: ${job.url}`);
+    return (await prompt.question('Escribí ENVIAR para presentar esta candidatura, o Enter para dejarla pendiente: ')).trim() === 'ENVIAR';
+  } finally {
+    prompt.close();
+  }
+}
+
 async function discoverJobs(p) {
   const boards = String(p.greenhouse || '').split(/[\s,]+/).filter(Boolean);
   const sites = String(p.lever || '').split(/[\s,]+/).filter(Boolean);
@@ -170,24 +193,24 @@ async function discoverJobs(p) {
 
 function label(value) { return value.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()); }
 function stripHtml(value) { return value.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim(); }
-const stop = new Set('the and for with from that this your you our are can will have has into about role work team experience design designer product user users their they them as an a to of in on or is be we it by at across using use years strong ability skills what who all not'.split(' '));
 function terms(value = '') { return (value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9+#.-]{3,}/g) || []).filter((word) => !stop.has(word)); }
+function roleTerms(value = '') { return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').match(/[a-z0-9+#.-]{3,}/g) || []; }
 function scoreJob(job, p) {
   const profileWords = new Set(terms([p.roles, p.summary, p.experience, p.skills, p.resume].join(' ')));
   const counts = new Map();
   terms([job.role, job.description].join(' ')).forEach((word) => counts.set(word, (counts.get(word) || 0) + 1));
   const jobWords = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 40).map(([word]) => word);
   const coverage = jobWords.filter((word) => profileWords.has(word)).length / Math.max(jobWords.length, 1);
-  const target = terms(p.roles || '');
-  const roleWords = terms(job.role);
+  const target = roleTerms(p.roles || '');
+  const roleWords = roleTerms(job.role);
   const roleFit = target.length ? roleWords.filter((word) => target.includes(word)).length / Math.max(roleWords.length, 1) : 0;
   return Math.max(20, Math.min(98, Math.round(35 + coverage * 50 + roleFit * 15)));
 }
 
 function inScope(job, p) {
   const text = `${job.role} ${job.location} ${job.description}`.toLowerCase();
-  const titleWords = new Set(terms(job.role));
-  const targetRoles = String(p.roles || '').split(/[,;\n]/).map((role) => terms(role)).filter((role) => role.length);
+  const titleWords = new Set(roleTerms(job.role));
+  const targetRoles = String(p.roles || '').split(/[,;\n]/).map((role) => roleTerms(role)).filter((role) => role.length);
   if (targetRoles.length && !targetRoles.some((role) => role.filter((word) => titleWords.has(word)).length / role.length >= 0.5)) return false;
   const mode = String(p.mode || 'Indistinto').toLowerCase();
   if (mode.includes('remoto') && !/remote|remoto|anywhere|worldwide|distributed|latam|latin america|americas|global/i.test(text)) return false;

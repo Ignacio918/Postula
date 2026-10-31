@@ -27,12 +27,13 @@ En Windows también podés abrir `INICIAR_AGENT.bat` y pegar o arrastrar el JSON
 
 El agente abre Chromium visible y consulta las fuentes cada hora mientras la terminal siga abierta. En el primer uso, el navegador crea `.postula-agent/browser-profile`; iniciá sesión allí directamente en los portales donde tengas cuenta. Las contraseñas no se guardan en Postula ni en el JSON; las cookies quedan en ese perfil local del navegador.
 
-El agente aplica el límite diario y el encaje mínimo configurados. Genera un PDF por vacante, completa campos estándar con datos del perfil y envía el formulario cuando puede resolver todos los campos obligatorios. Guarda el resultado y los PDFs en `.postula-agent/`. Para sincronizar estados, abrí **Mi perfil → Importar resultados** y elegí `.postula-agent/results.json`.
+El agente aplica el límite diario y el encaje mínimo configurados. Genera un PDF por vacante y completa campos estándar con datos del perfil. Si todas las respuestas están disponibles, deja el formulario listo y espera que escribas `ENVIAR` en la terminal para presentar esa candidatura. Guarda el resultado y los PDFs en `.postula-agent/`. Para sincronizar estados, abrí **Mi perfil → Importar resultados** y elegí `.postula-agent/results.json`.
 
 ## Límites del agente
 
 - La primera versión consulta boards públicos de Greenhouse y Lever que agregues al perfil; no rastrea toda la web.
 - La adaptación actual destaca el puesto y las competencias encontradas en tu CV, y prioriza bloques de experiencia. Conserva el texto de origen; no inventa datos ni hace una reescritura generativa con IA.
+- Antes de enviar cada candidatura, el agente requiere confirmación manual con `ENVIAR` en la terminal.
 - Si un formulario pide un dato ausente, una declaración legal, un CAPTCHA, una verificación o un paso que el agente no reconoce, lo deja pendiente y no adivina la respuesta ni evade el control.
 - Los formularios cambian por empresa. Revisá el resultado local, especialmente los estados `submitted_unconfirmed` y `needs_attention`.
 - El agente funciona en tu computadora, no como tarea de fondo de Vercel. Dejá abierta la terminal y el navegador para que siga buscando.

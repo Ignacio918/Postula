@@ -23,7 +23,7 @@ En modo local, los datos de perfil, ofertas guardadas y candidaturas quedan en e
 - Incluye seis ofertas demostrativas para explorar el diseño. Están etiquetadas `DEMO`; no representan puestos actuales ni deben usarse para enviar una candidatura.
 - La búsqueda en vivo consulta los endpoints públicos de lectura de Greenhouse y Lever para las empresas que configures.
 - El botón de candidatura descarga el CV adaptado y abre el formulario oficial de la vacante. Por seguridad, iniciá sesión en el sitio de la empresa; esta app no almacena contraseñas.
-- Esta versión no completa ni envía formularios de terceros en automático. El cierre de sesión, CAPTCHA, preguntas sensibles y restricciones del sitio deben resolverse en el sitio oficial.
+- El portal web no completa ni envía formularios por sí solo. El agente local de `README.md` puede completar campos conocidos; deja preguntas sin respuesta y verificaciones pendientes, y requiere confirmación manual `ENVIAR` antes de cada envío.
 - Las ofertas nuevas reciben una coincidencia inicial orientativa. Su comparación completa mejora cuando el perfil incluye experiencia y habilidades relevantes.
 - La vista previa de CV reorganiza texto provisto por la persona. No genera PDF ni añade hechos nuevos.
 
