@@ -77,6 +77,20 @@
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <dialog id="filters-dialog"><form method="dialog" class="dialog-content"><div class="dialog-header"><div><div class="eyebrow">AJUSTÁ LA BÚSQUEDA</div><h2>Filtros</h2></div><button class="icon-button close-dialog" aria-label="Cerrar">×</button></div><label class="check-row"><input type="checkbox" id="remote-filter" checked /><span><b>Trabajo remoto</b><small>Incluye ofertas que permiten trabajar desde Argentina.</small></span></label><label class="check-row"><input type="checkbox" id="recent-filter" /><span><b>Publicadas recientemente</b><small>Prioriza puestos con actividad reciente.</small></span></label><label>Tipo de rol<select id="role-filter"><option value="all">Todos</option><option value="product">Product design</option><option value="ux">UX/UI design</option><option value="research">UX research</option></select></label><div class="dialog-actions"><button class="button button-quiet close-dialog">Cancelar</button><button class="button button-primary close-dialog">Aplicar filtros</button></div></form></dialog>
 <dialog id="apply-dialog"><form method="dialog" class="dialog-content apply-dialog-content"><div class="dialog-header"><div><div class="eyebrow">POSTULACIÓN ASISTIDA</div><h2>Prepará y abrí la candidatura.</h2></div><button class="icon-button close-dialog" aria-label="Cerrar">×</button></div><div id="apply-content"></div><div class="dialog-actions" id="apply-actions"></div></form></dialog>
+<script>
+  window.POSTULA_AUTH_MODE = 'signin';
+  document.querySelector('#auth-switch').addEventListener('click', event => {
+    if (!event.target.closest('#auth-mode')) return;
+    const signup = window.POSTULA_AUTH_MODE !== 'signup';
+    window.POSTULA_AUTH_MODE = signup ? 'signup' : 'signin';
+    document.querySelector('#auth-title').textContent = signup ? 'Creá tu cuenta.' : 'Entrá a Postula.';
+    document.querySelector('#auth-copy').textContent = signup ? 'Un solo espacio para tu perfil y tus postulaciones.' : 'Tu perfil y tus postulaciones, disponibles desde tus dispositivos.';
+    document.querySelector('#auth-submit').textContent = signup ? 'Crear cuenta' : 'Iniciar sesión';
+    document.querySelector('#auth-name-wrap').hidden = !signup;
+    document.querySelector('#auth-password').autocomplete = signup ? 'new-password' : 'current-password';
+    document.querySelector('#auth-switch').innerHTML = signup ? '¿Ya tenés cuenta? <button type="button" id="auth-mode">Iniciar sesión</button>' : '¿Primera vez? <button type="button" id="auth-mode">Crear cuenta</button>';
+  });
+</script>
 <script type="module" src="app.js"></script>
 </body>
 </html>
