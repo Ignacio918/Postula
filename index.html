@@ -91,7 +91,7 @@
     document.querySelector('#auth-code').required = false;
     document.querySelector('#auth-email').readOnly = false;
     document.querySelector('#auth-password').autocomplete = signup ? 'new-password' : 'current-password';
-    document.querySelector('#auth-switch').innerHTML = signup ? '¿Ya tenés cuenta? <button type="button" id="auth-mode">Iniciar sesión</button>' : '¿Primera vez? <button type="button" id="auth-mode">Crear cuenta</button>';
+    document.querySelector('#auth-switch').innerHTML = signup ? '¿Ya tenés cuenta? <button type="button" id="auth-mode">Iniciar sesión</button>' : '<button type="button" id="auth-verify-existing">Ya tengo un código</button> · ¿Primera vez? <button type="button" id="auth-mode">Crear cuenta</button>';
   });
 </script>
 <script type="module" src="app.js"></script>
