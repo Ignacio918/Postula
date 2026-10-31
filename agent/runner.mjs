@@ -426,11 +426,14 @@ async function discoverJobs(p) {
 }
 
 async function discoverWebSearch(p) {
+  const openAiKeyPath = path.join(workDir, 'openai-api-key.txt');
   const keyPath = path.join(workDir, 'brave-search-api-key.txt');
-  const apiKey = process.env.POSTULA_BRAVE_SEARCH_API_KEY || (await readFile(keyPath, 'utf8').catch(() => '')).trim();
-  if (!apiKey) {
+  const openAiKey = process.env.OPENAI_API_KEY || (await readFile(openAiKeyPath, 'utf8').catch(() => '')).trim();
+  const braveKey = process.env.POSTULA_BRAVE_SEARCH_API_KEY || (await readFile(keyPath, 'utf8').catch(() => '')).trim();
+  const provider = openAiKey ? 'OpenAI' : braveKey ? 'Brave' : '';
+  if (!provider) {
     if (Date.now() - lastWebSearchNoticeAt > webSearchIntervalMs) {
-      console.log('Búsqueda web amplia desactivada: agregá tu clave privada en .postula-agent/brave-search-api-key.txt.');
+      console.log('Búsqueda web amplia desactivada: configurá una clave local de OpenAI o Brave; los feeds gratuitos siguen activos.');
       lastWebSearchNoticeAt = Date.now();
     }
     return [];
@@ -448,15 +451,29 @@ async function discoverWebSearch(p) {
   const searchResults = [];
   for (const q of queryGroups) {
     try {
-      const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({ q, count: '20', country: 'AR', search_lang: 'en' })}`, {
-        headers: { Accept: 'application/json', 'X-Subscription-Token': apiKey }, signal: AbortSignal.timeout(20000),
-      });
-      if (!response.ok) throw new Error(`Brave Search HTTP ${response.status}`);
-      const data = await response.json();
-      searchResults.push(...(data.web?.results || []));
+      if (provider === 'OpenAI') {
+        const response = await fetch('https://api.openai.com/v1/responses', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${openAiKey}` },
+          body: JSON.stringify({
+            model: 'gpt-4.1-mini', tools: [{ type: 'web_search', search_context_size: 'low' }], tool_choice: 'required',
+            include: ['web_search_call.action.sources'], max_output_tokens: 40,
+            input: `Buscá avisos de empleo publicados actualmente para estos puestos: ${q}. Priorizá páginas oficiales de empresas y enlaces directos de sus sistemas ATS. Ejecutá la búsqueda web y respondé únicamente OK.`,
+          }), signal: AbortSignal.timeout(45000),
+        });
+        if (!response.ok) throw new Error(`OpenAI API HTTP ${response.status}`);
+        const data = await response.json();
+        searchResults.push(...extractWebSearchSources(data.output));
+      } else {
+        const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${new URLSearchParams({ q, count: '20', country: 'AR', search_lang: 'en' })}`, {
+          headers: { Accept: 'application/json', 'X-Subscription-Token': braveKey }, signal: AbortSignal.timeout(20000),
+        });
+        if (!response.ok) throw new Error(`Brave Search HTTP ${response.status}`);
+        const data = await response.json();
+        searchResults.push(...(data.web?.results || []));
+      }
     } catch (error) {
       console.warn(`Búsqueda web: ${error.message || error}`);
-      if (/HTTP 401|HTTP 403/.test(String(error.message))) break;
+      if (/HTTP 401|HTTP 403|HTTP 429/.test(String(error.message))) break;
     }
   }
   if (!searchResults.length) return [];
@@ -488,6 +505,19 @@ async function discoverWebSearch(p) {
   for (const result of employerPages) if (result.status === 'fulfilled' && result.value) jobs.push(result.value);
   console.log(`Búsqueda web: ${searchResults.length} resultados transitorios · ${jobs.length} vacantes verificadas en páginas oficiales/ATS.`);
   return jobs;
+}
+
+function extractWebSearchSources(output) {
+  const found = [];
+  const visit = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (!Array.isArray(value) && typeof value.url === 'string' && /^https?:\/\//i.test(value.url) && value.title) {
+      found.push({ url: value.url, title: value.title, description: value.snippet || '' });
+    }
+    for (const child of Array.isArray(value) ? value : Object.values(value)) visit(child);
+  };
+  visit(output);
+  return [...new Map(found.map((source) => [source.url, source])).values()];
 }
 
 async function fetchPublicBoard(board) {
