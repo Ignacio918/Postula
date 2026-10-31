@@ -6,6 +6,7 @@ Thumbs.db
 config.js
 /dist/
 /node_modules/
+**/__pycache__/
 /.postula-agent/
 /.taste-skill/
 /work/

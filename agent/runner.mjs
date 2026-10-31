@@ -42,7 +42,7 @@ for (const application of payload.applications || []) {
   if (application.jobId && ['Enviada', 'Entrevista', 'Seguimiento'].includes(application.status) && !state.applied.includes(application.jobId)) state.applied.push(application.jobId);
 }
 const isBatch = Array.isArray(payload.jobs) && payload.jobs.length > 0;
-const intervalMinutes = Math.max(15, Math.min(1440, Number(settings.intervalMinutes || 30)));
+let intervalMinutes = Math.max(1, Math.min(1440, Number(settings.intervalMinutes || 30)));
 const browserHeadless = settings.browserHeadless !== false;
 const webSearchIntervalMs = 6 * 60 * 60 * 1000;
 let lastWebSearchAt = 0;
@@ -80,6 +80,7 @@ while (keepRunning) {
     Object.assign(profile, pendingDesktopConfig.profile);
     minimumMatch = pendingDesktopConfig.minimumMatch;
     dailyLimit = pendingDesktopConfig.dailyLimit;
+    intervalMinutes = pendingDesktopConfig.intervalMinutes;
     cachedProfileVectorKey = '';
     cachedProfileVector = new Map();
     pendingDesktopConfig = null;
@@ -403,16 +404,18 @@ async function startDashboard() {
         if (!nextProfile.name || !nextProfile.email || !nextProfile.roles || !nextProfile.resume) throw new Error('Completá nombre, email, puestos objetivo y CV.');
         const nextMinimumMatch = Math.max(30, Math.min(95, Number(body.minimumMatch) || minimumMatch));
         const nextDailyLimit = Math.max(1, Math.min(20, Number(body.dailyLimit) || dailyLimit));
+        const nextIntervalMinutes = Math.max(1, Math.min(1440, Number(body.intervalMinutes) || intervalMinutes));
         settings.minimumMatch = nextMinimumMatch;
         settings.dailyLimit = nextDailyLimit;
+        settings.intervalMinutes = nextIntervalMinutes;
         payload.profile = nextProfile;
         payload.settings = settings;
         await writeFile(profileFile, JSON.stringify(payload, null, 2), 'utf8');
-        pendingDesktopConfig = { profile: nextProfile, minimumMatch: nextMinimumMatch, dailyLimit: nextDailyLimit };
+        pendingDesktopConfig = { profile: nextProfile, minimumMatch: nextMinimumMatch, dailyLimit: nextDailyLimit, intervalMinutes: nextIntervalMinutes };
         forceSearchRequested = true;
         await setLiveStatus({ phase: 'Perfil guardado · buscando ahora', currentJob: null, error: '' });
         wakeScheduledSearch?.();
-        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }).end(JSON.stringify({ ok: true, nextSearch: 'immediate', minimumMatch: nextMinimumMatch, dailyLimit: nextDailyLimit }));
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }).end(JSON.stringify({ ok: true, nextSearch: 'immediate', minimumMatch: nextMinimumMatch, dailyLimit: nextDailyLimit, intervalMinutes: nextIntervalMinutes }));
       } catch (error) {
         response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: error.message || 'No pude guardar el perfil.' }));
       }
@@ -528,12 +531,17 @@ async function discoverJobs(p) {
 
 async function discoverPythonScrape(p) {
   const script = path.join(root, 'agent', 'public_scraper.py');
+  const cachePath = path.join(workDir, 'cache', 'python-scraper.json');
+  const cached = await readJson(cachePath, null);
+  if (cached?.roles === String(p.roles || '') && cached?.fetchedAt && Date.now() - cached.fetchedAt < 60 * 60 * 1000) return cached.jobs || [];
   const input = JSON.stringify({ roles: p.roles || '' });
   for (const [command, prefix] of [['python', []], ['py', ['-3']]]) {
     try {
       const { stdout } = await execFileAsync(command, [...prefix, script, input], { timeout: 45000, maxBuffer: 4 * 1024 * 1024, windowsHide: true });
       const jobs = JSON.parse(stdout);
       console.log(`Scraper Python: ${Array.isArray(jobs) ? jobs.length : 0} avisos públicos revisados.`);
+      await mkdir(path.dirname(cachePath), { recursive: true });
+      await writeFile(cachePath, JSON.stringify({ roles: String(p.roles || ''), fetchedAt: Date.now(), jobs: Array.isArray(jobs) ? jobs : [] }));
       return Array.isArray(jobs) ? jobs : [];
     } catch (error) {
       if (error.code === 'ENOENT') continue;
