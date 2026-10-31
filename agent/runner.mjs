@@ -284,8 +284,8 @@ function valueFor(label, p) {
   if (/first name|given name|nombre\b/.test(text) && !/last|apellido/.test(text)) return p.name?.trim().split(/\s+/)[0];
   if (/last name|family name|surname|apellido/.test(text)) return p.name?.trim().split(/\s+/).slice(1).join(' ');
   if (/country|pa[ií]s/.test(text)) return p.location?.split(',').at(-1).trim();
-  if (/linkedin/.test(text)) return /linkedin/i.test(p.link || '') ? p.link : '';
-  if (/portfolio|website|web site|sitio web|url/.test(text)) return p.link;
+  if (/linkedin/.test(text)) return p.linkedin || (/linkedin/i.test(p.link || '') ? p.link : '');
+  if (/portfolio|website|web site|sitio web|url/.test(text)) return p.portfolio || p.link;
   if (/city|location|ubicaci[oó]n|ciudad/.test(text)) return p.location?.split(',')[0].trim();
   if (/cover letter|carta de presentaci[oó]n|professional summary|resumen profesional/.test(text)) return p.summary || '';
   return '';
@@ -293,6 +293,10 @@ function valueFor(label, p) {
 
 async function fillKnownFields(form, p, cvPath) {
   const missing = [];
+  const radioGroups = new Map();
+  const checkboxGroups = new Map();
+  const selectedRadios = new Set((p.applicationAnswers?.radio || []).map(normalizeAnswer));
+  const selectedCheckboxes = new Set((p.applicationAnswers?.checkboxes || []).map(normalizeAnswer));
   const controls = form.locator('input:not([type="hidden"]):not([type="submit"]):not([type="button"]),textarea,select');
   const total = await controls.count();
   for (let i = 0; i < total; i += 1) {
@@ -309,14 +313,25 @@ async function fillKnownFields(form, p, cvPath) {
     }
     if (!await field.isVisible().catch(() => false)) continue;
     if (['checkbox', 'radio'].includes(type)) {
-      if (required && !await field.isChecked().catch(() => false)) missing.push(await field.evaluate((el) => el.labels?.[0]?.innerText || el.getAttribute('aria-label') || el.name || 'confirmación legal'));
+      const option = await field.evaluate((el) => el.labels ? [...el.labels].map((item) => item.innerText).join(' ').trim() : el.getAttribute('aria-label') || el.value || 'confirmación legal');
+      const groupName = await field.getAttribute('name') || `${type}-${i}`;
+      const groups = type === 'radio' ? radioGroups : checkboxGroups;
+      if (!groups.has(groupName)) groups.set(groupName, { label: option, required });
+      if ((type === 'radio' ? selectedRadios : selectedCheckboxes).has(normalizeAnswer(option))) {
+        await field.check({ timeout: 1500 }).catch(() => {});
+      }
       continue;
     }
-    const label = await field.evaluate((el) => [el.labels ? [...el.labels].map((item) => item.innerText).join(' ') : '', el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || '', el.getAttribute('name') || '', el.id || ''].join(' '));
+    const label = await field.evaluate((el) => [el.labels ? [...el.labels].map((item) => item.innerText).join(' ') : '', el.closest('.application-question')?.innerText || '', el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || '', el.getAttribute('name') || '', el.id || ''].join(' '));
     const mapped = valueFor(label, p);
     if (mapped && type !== 'file' && await field.inputValue().catch(() => '') === '') {
       if (await field.evaluate((el) => el.tagName === 'SELECT')) {
-        await field.selectOption({ label: mapped }, { timeout: 1500 }).catch(() => {});
+        const optionLabels = await field.locator('option').allTextContents().catch(() => []);
+        const country = p.location?.split(',').at(-1).trim();
+        const option = /which location are you applying for/i.test(label) && country
+          ? optionLabels.find((item) => normalizeAnswer(item).includes(normalizeAnswer(country)))
+          : optionLabels.find((item) => normalizeAnswer(item) === normalizeAnswer(mapped));
+        if (option) await field.selectOption({ label: option }, { timeout: 1500 }).catch(() => {});
       } else {
         await field.fill(mapped, { timeout: 1500 }).catch(() => {});
       }
@@ -324,5 +339,15 @@ async function fillKnownFields(form, p, cvPath) {
     const current = await field.inputValue().catch(() => '');
     if (required && !current) missing.push(label.trim() || `campo ${i + 1}`);
   }
+  for (const [groupName, group] of radioGroups) {
+    const isSelected = await form.locator('input[type="radio"]:checked').evaluateAll((nodes, name) => nodes.some((node) => node.name === name), groupName).catch(() => false);
+    if (group.required && !isSelected) missing.push(group.label);
+  }
+  for (const [groupName, group] of checkboxGroups) {
+    const isSelected = await form.locator('input[type="checkbox"]:checked').evaluateAll((nodes, name) => nodes.some((node) => node.name === name), groupName).catch(() => false);
+    if (group.required && !isSelected) missing.push(group.label);
+  }
   return { missing: [...new Set(missing)] };
 }
+
+function normalizeAnswer(value = '') { return String(value).replace(/\s+/g, ' ').trim().toLowerCase(); }
