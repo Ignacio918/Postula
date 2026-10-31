@@ -279,6 +279,7 @@ function valueFor(label, p) {
   const text = label.toLowerCase().replace(/[_-]+/g, ' ');
   if (/e-?mail/.test(text)) return p.email;
   if (/phone|mobile|tel[eé]fono|celular/.test(text)) return p.phone;
+  if (/current company|current employer|present employer|empresa actual/.test(text)) return p.currentCompany || '';
   if (/full name|your name|^name$|nombre completo/.test(text)) return p.name;
   if (/first name|given name|nombre\b/.test(text) && !/last|apellido/.test(text)) return p.name?.trim().split(/\s+/)[0];
   if (/last name|family name|surname|apellido/.test(text)) return p.name?.trim().split(/\s+/).slice(1).join(' ');
