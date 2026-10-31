@@ -1,87 +1,56 @@
 # Postula
 
-**Encontrá mejores oportunidades. Prepará cada candidatura con tu experiencia real.**
+Postula busca vacantes, las compara con tu CV, prepara una versión orientada al puesto y permite que un agente local complete y envíe solicitudes compatibles.
 
-Postula es una pequeña app web en español para reunir ofertas públicas, comparar requisitos, preparar un CV por puesto y seguir tus postulaciones.
+## Puesta en marcha
 
-## Probarla
+1. Iniciá sesión en [Postula](https://postula-iota.vercel.app/) y abrí **Mi perfil**.
+2. Importá tu CV en PDF o TXT. La extracción del PDF se hace en el navegador; revisá los datos de contacto y guardá el perfil.
+3. Completá los puestos que buscás y agregá los tokens públicos de tus boards Greenhouse o sites Lever.
+4. Definí modalidad, encaje mínimo y máximo diario. Guardá los cambios.
+5. Elegí **Descargar configuración del agente**. El JSON incluye CV y datos personales: queda en tu computadora, no lo subas al repo ni lo compartas.
+6. Instalá el agente local siguiendo la sección siguiente.
 
-- **Modo local:** abrí `INICIAR.bat` o `index.html` y elegí “Usar Postula en este dispositivo”. Los datos quedan en ese navegador.
-- **Modo con cuenta:** requiere Neon Auth + Data API. Seguí “Conectar Neon” más abajo; el login no queda activo hasta configurar esas URLs.
-- **En Vercel:** cada push a `main` publica automáticamente una versión. Para usar Neon, configurá `npm run build` y `dist` como se explica abajo.
+La búsqueda en la app también consulta esas fuentes al tocar **Buscar ofertas**. Las tarjetas **DEMO** son ejemplos, nunca vacantes actuales. El encaje usa coincidencias de términos y puestos objetivo; es una señal orientativa, no una evaluación de contratación.
 
-## Primeros pasos
+## Instalar y ejecutar el agente local
 
-1. En **Mi perfil**, cargá contacto, objetivos, experiencia y habilidades.
-2. En **Fuentes para búsqueda en vivo**, agregá nombres públicos de boards Greenhouse o sites Lever.
-3. Tocá **Buscar ofertas** y revisá encaje, requisitos y fuente.
-4. Abrí una oferta, revisá y autorizá la candidatura. Postula descarga el CV adaptado y abre la página de empleo para continuar allí.
-
-También se puede explorar la interfaz con ejemplos marcados **DEMO**. No son vacantes vigentes.
-
-## Qué puede hacer
-
-- Consultar feeds públicos de Greenhouse y Lever.
-- Filtrar y guardar ofertas.
-- Comparar términos del perfil con los requisitos y mostrar una coincidencia orientativa.
-- Reorganizar la información aportada para generar una vista previa y descargar un CV en texto por oferta.
-- Abrir el portal de empleo de la empresa y registrar el estado de seguimiento.
-
-## Qué no hace
-
-Esta versión no inicia sesión ni completa o envía formularios de terceros. Los portales usan preguntas, controles y reglas distintas; las credenciales se introducen directamente en el sitio de la empresa. LinkedIn e Indeed restringen bots de terceros. No se eluden CAPTCHAs ni controles de acceso.
-
-El porcentaje de encaje es orientativo, basado en coincidencias de texto. Revisá el CV, las respuestas y la publicación antes de postularte.
-
-## Privacidad
-
-En modo local, perfil, preferencias y seguimiento quedan en `localStorage`. Al configurar la cuenta Neon, el perfil, las ofertas guardadas y las postulaciones se sincronizan en Postgres con políticas RLS por usuario. La identidad y las sesiones las administra Neon Auth. No guardes aquí contraseñas de LinkedIn, Greenhouse, Lever ni otros portales. El código del repositorio es público; no agregues `.env` ni datos personales al repositorio.
-
-## Publicar en Vercel o Netlify
-
-El código ya está en GitHub. En cualquiera de los proveedores:
-
-1. Elegí **Add New Project / Add a site → Import from GitHub** y autorizá el repositorio `Ignacio918/Postula`.
-2. Configurá el proyecto con directorio raíz `.`. Para la versión básica sin cuenta, podés dejar vacíos el comando de build y el directorio de salida.
-3. Publicá y abrí la URL temporal que te da el proveedor. Para conectar Neon, configurá las variables de entorno y el build antes de publicar, o redeplegá después de agregarlos.
-
-El sitio usa HTML, CSS y JavaScript y tiene `index.html` en la raíz. Si vas a usar Neon, seguí los pasos y el build indicados más abajo para generar el `config.js` público con los endpoints de Neon. Para búsqueda en vivo, abrilo desde el dominio de Vercel/Netlify o desde un servidor local, no desde `file://`.
-
-## Conectar Neon (una vez)
-
-1. Creá la base Neon desde la integración de Vercel y vinculala al proyecto `postula`.
-2. En Neon abrí **Better Auth → Configure Auth**, agregá el dominio de producción a trusted domains y dejá habilitado el acceso por email/contraseña.
-3. En **Data API**, habilitala para `main`. La integración de Vercel agrega `NEON_AUTH_BASE_URL` y `NEON_DATA_API_URL` cuando los servicios están habilitados.
-4. En **SQL Editor**, ejecutá el contenido de [`neon/schema.sql`](neon/schema.sql). Esta tabla usa RLS para que cada persona solo lea y escriba su propia fila.
-5. En **Vercel → Postula → Settings → Environment Variables**, agregá:
-
-   - `POSTULA_AUTH_URL` = Auth URL de Neon (la URL de Better Auth de la rama `main`).
-   - `POSTULA_DATA_API_URL` = API URL de Neon (terminada en `/rest/v1`).
-
-   Marcá **Production** para el sitio publicado y **Preview** si también vas a probar previews. La integración de Vercel puede agregar variables de Postgres y Auth con un prefijo personalizado; Postula necesita estas dos variables con los nombres exactos de arriba. El build genera `config.js` dentro de `dist/`; ese archivo está ignorado por Git y contiene los endpoints públicos del proyecto.
-6. Configurá Vercel **Build Command** `npm run build` y **Output Directory** `dist`. Guardá y hacé **Redeploy**. No publiques el directorio raíz si querés login: ahí no se genera el `config.js` con Neon.
-7. Abrí el sitio. Tocá **Crear cuenta**, registrate con tu email y contraseña de Postula, y cargá el perfil. Al primer ingreso, Postula intentará importar el perfil local de ese navegador.
-
-El cliente solo recibe endpoints públicos de Neon, nunca una contraseña de base ni un token de administrador. La seguridad del perfil depende de las políticas RLS de [`neon/schema.sql`](neon/schema.sql); ejecutalas antes de cargar datos reales. La cuenta de Postula es distinta de tus credenciales de portales de empleo.
-
-### Protección del sitio público
-
-Vercel **Deployment Protection → All Deployments** puede restringir producción a miembros del equipo que tengan una cuenta Vercel. En Hobby puede variar la disponibilidad del alcance de producción. Esta barrera es aparte del login de Postula y no sirve para dar acceso fácil a otros usuarios. El login de Postula más RLS protege cada perfil aunque la página sea pública.
-
-## Ejecutar un servidor local opcional
-
-Desde esta carpeta, ejecutá:
+Requisitos: Node.js 20 o superior y una terminal en la carpeta del repo.
 
 ```powershell
-npm run build
-python -m http.server 8000 --directory dist
+npm install
+npx playwright install chromium
+npm run agent -- "C:\Users\TU_USUARIO\Downloads\postula-agent-config.json"
 ```
 
-Después abrí <http://localhost:8000>. El servidor local evita restricciones que algunos navegadores aplican a llamadas de red desde `file://`.
+En Windows también podés abrir `INICIAR_AGENT.bat` y pegar o arrastrar el JSON descargado cuando lo pida.
 
-## Tecnología
+El agente abre Chromium visible y consulta las fuentes cada hora mientras la terminal siga abierta. En el primer uso, el navegador crea `.postula-agent/browser-profile`; iniciá sesión allí directamente en los portales donde tengas cuenta. Las contraseñas no se guardan en Postula ni en el JSON; las cookies quedan en ese perfil local del navegador.
 
-HTML, CSS y JavaScript nativos; el build incorpora el SDK oficial `@neon/neon-js` en el bundle local. La app estática requiere hosting HTTPS y acceso de red para Neon Auth/Data API.
+El agente aplica el límite diario y el encaje mínimo configurados. Genera un PDF por vacante, completa campos estándar con datos del perfil y envía el formulario cuando puede resolver todos los campos obligatorios. Guarda el resultado y los PDFs en `.postula-agent/`. Para sincronizar estados, abrí **Mi perfil → Importar resultados** y elegí `.postula-agent/results.json`.
+
+## Límites del agente
+
+- La primera versión consulta boards públicos de Greenhouse y Lever que agregues al perfil; no rastrea toda la web.
+- La adaptación actual destaca el puesto y las competencias encontradas en tu CV, y prioriza bloques de experiencia. Conserva el texto de origen; no inventa datos ni hace una reescritura generativa con IA.
+- Si un formulario pide un dato ausente, una declaración legal, un CAPTCHA, una verificación o un paso que el agente no reconoce, lo deja pendiente y no adivina la respuesta ni evade el control.
+- Los formularios cambian por empresa. Revisá el resultado local, especialmente los estados `submitted_unconfirmed` y `needs_attention`.
+- El agente funciona en tu computadora, no como tarea de fondo de Vercel. Dejá abierta la terminal y el navegador para que siga buscando.
+
+## Desarrollo y despliegue web
+
+El sitio es HTML, CSS y JavaScript estáticos. Vercel publica `main`; el build genera `dist/` e incluye el worker de PDF.js.
+
+```powershell
+npm install
+$env:POSTULA_AUTH_URL="<Neon Auth URL>"
+$env:POSTULA_DATA_API_URL="<Neon Data API URL>"
+npm run build
+```
+
+En Vercel, configurá el comando `npm run build`, el directorio de salida `dist` y las variables `POSTULA_AUTH_URL` y `POSTULA_DATA_API_URL` para Production. No agregues secretos al repositorio.
+
+La cuenta Postula y sus datos están en Neon. El agente usa una copia local del perfil descargada por la persona usuaria; no recibe la contraseña de Neon ni las claves de portales.
 
 ## Licencia
 

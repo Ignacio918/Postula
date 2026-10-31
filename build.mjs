@@ -15,4 +15,5 @@ await bundle({ entryPoints: ['app.js'], outfile: 'dist/app.js', bundle: true, fo
 for (const file of ['index.html', 'styles.css', 'config.js']) {
   await copyFile(file, `dist/${file}`);
 }
+await copyFile('node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', 'dist/pdf.worker.min.mjs');
 console.log('Postula built into dist/ with the Neon SDK bundled locally.');

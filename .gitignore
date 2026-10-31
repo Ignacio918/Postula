@@ -6,3 +6,6 @@ Thumbs.db
 config.js
 /dist/
 /node_modules/
+/.postula-agent/
+postula-agent-config.json
+postula-agent-batch.json
