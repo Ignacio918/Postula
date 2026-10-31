@@ -24,6 +24,7 @@ state.applied ||= [];
 state.attempted ||= [];
 state.pending ||= [];
 state.discovered ||= [];
+state.retryQueue ||= [];
 for (const application of payload.applications || []) {
   if (application.jobId && ['Enviada', 'Entrevista', 'Seguimiento'].includes(application.status) && !state.applied.includes(application.jobId)) state.applied.push(application.jobId);
 }
@@ -63,17 +64,23 @@ while (keepRunning) {
     if (!state.discovered.includes(prior.jobId)) state.discovered.push(prior.jobId);
     if (['needs_attention', 'ready_to_submit', 'submitted_unconfirmed'].includes(prior.status) && !state.pending.includes(prior.jobId)) state.pending.push(prior.jobId);
   }
+  if ((state.runnerVersion || 0) < 2) {
+    state.retryQueue = [...new Set(results.filter((entry) => entry.source === 'Remote OK' && ['needs_attention', 'error'].includes(entry.status)).slice(-12).reverse().map((entry) => entry.jobId))].slice(0, 3);
+    state.runnerVersion = 2;
+    console.log(`Revisión única tras actualizar el navegador del agente: ${state.retryQueue.length} enlaces de Remote OK.`);
+  }
   const candidates = jobs
     .filter((job) => inScope(job, profile))
     .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
-    .filter((job) => job.match >= minimumMatch && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && !state.pending.includes(job.id) && !state.discovered.includes(job.id))
+    .filter((job) => job.match >= minimumMatch && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && (state.retryQueue.includes(job.id) || (!state.pending.includes(job.id) && !state.discovered.includes(job.id))))
     .sort((a, b) => b.match - a.match)
-    .slice(0, 30);
+    .slice(0, state.retryQueue.length ? 3 : 30);
   const cycleResults = [];
   const matchCount = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.applied.includes(job.id)).length;
   if (!candidates.length) console.log(`Ciclo completo · ${matchCount} ofertas coinciden con tu perfil; ninguna nueva para revisar.`);
   else console.log(`Agente Postula · ${candidates.length} ofertas nuevas · ${matchCount} compatibles · encaje mínimo ${minimumMatch}% · máximo ${dailyLimit} envíos/día`);
 
+  const pendingPages = [];
   for (const job of candidates) {
   const result = { jobId: job.id, source: job.source, company: job.company, role: job.role, url: job.url, match: job.match, at: new Date().toISOString() };
   state.discovered.push(job.id);
@@ -87,11 +94,18 @@ while (keepRunning) {
     if (applicationUrl && applicationUrl !== page.url()) await page.goto(applicationUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
     result.url = page.url();
     await page.waitForTimeout(1200);
+    if (await hasBlocker(page)) await waitForHumanChallenge(page, job);
     if (await hasBlocker(page)) {
       result.status = 'needs_attention';
-      result.reason = 'El sitio muestra un CAPTCHA, una verificación o un control que requiere intervención.';
+      result.reason = 'El sitio sigue mostrando una verificación. La pestaña queda abierta; resolvela manualmente y volvé a intentar esta oferta desde results.json.';
     } else {
-      const form = await openApplicationForm(page);
+      const listingPage = page;
+      const application = await openApplicationForm(page, job);
+      page = application.page;
+      if (page !== listingPage) await listingPage.close().catch(() => {});
+      const form = application.form;
+      result.url = page.url();
+      if (!form) throw new Error('No encontré un formulario de candidatura reconocible en este portal.');
       const filled = await fillKnownFields(form, profile, cvPath);
       if (await hasBlocker(page)) {
         result.status = 'needs_attention';
@@ -100,7 +114,11 @@ while (keepRunning) {
         result.status = 'needs_attention';
         result.reason = `Campos obligatorios que no pude completar con tu perfil: ${filled.missing.join('; ')}`;
       } else {
-        const submit = form.locator('button[type="submit"],input[type="submit"]');
+        let submit = form.locator('button[type="submit"]:visible,input[type="submit"]:visible,button:not([type]):visible');
+        if (await submit.count() !== 1) {
+          const namedSubmit = form.getByRole('button', { name: /submit application|send application|submit|apply now|enviar candidatura|postular/i }).filter({ visible: true });
+          if (await namedSubmit.count() === 1) submit = namedSubmit;
+        }
         if (await submit.count() !== 1) {
           result.status = 'needs_attention';
           result.reason = 'No pude identificar un único botón de envío seguro.';
@@ -137,8 +155,12 @@ while (keepRunning) {
     }
   } catch (error) {
     const message = String(error?.message || error);
-    if (/No encontré un formulario de candidatura reconocible/i.test(message)) {
+    if (page && !page.isClosed()) result.url = page.url();
+    if (page && await hasBlocker(page).catch(() => false)) {
       result.status = 'needs_attention';
+      result.reason = 'El portal requiere que completes una verificación humana. La pestaña queda abierta.';
+    } else if (/No encontré un formulario de candidatura reconocible/i.test(message)) {
+      result.status = 'no_application_form';
       result.reason = `No se detectó un formulario automático. Página actual: ${result.url || job.url}`;
     } else {
       result.status = 'error';
@@ -146,14 +168,18 @@ while (keepRunning) {
     }
   }
   results.push(result);
+  state.retryQueue = state.retryQueue.filter((id) => id !== job.id);
   cycleResults.push(result);
   await writeFile(stateFile, JSON.stringify(state, null, 2));
   await writeFile(resultFile, JSON.stringify({ date: today, results }, null, 2));
   console.log(`${result.status.padEnd(22)} [${job.source || 'bolsa'}] ${job.company} · ${job.role}${result.reason ? ` — ${result.reason}` : ''}`);
-    if (page && !['ready_to_submit', 'submitted_unconfirmed'].includes(result.status)) await page.close().catch(() => {});
+    if (page && ['needs_attention', 'ready_to_submit', 'submitted_unconfirmed'].includes(result.status)) {
+      pendingPages.push(page);
+      while (pendingPages.length > 3) await pendingPages.shift().close().catch(() => {});
+    } else if (page) await page.close().catch(() => {});
   }
   if (cycleResults.length) {
-    console.log(`${cycleResults.filter((result) => result.status === 'ready_to_submit').length} formularios listos para revisión · ${cycleResults.filter((result) => result.status === 'needs_attention').length} casos que requieren intervención. Detalle en results.json.`);
+    console.log(`${cycleResults.filter((result) => result.status === 'ready_to_submit').length} formularios listos para revisión · ${cycleResults.filter((result) => result.status === 'needs_attention').length} casos que requieren intervención · ${cycleResults.filter((result) => result.status === 'no_application_form').length} publicaciones sin formulario. Detalle en results.json.`);
     for (const result of cycleResults.filter((entry) => ['needs_attention', 'submitted_unconfirmed', 'ready_to_submit'].includes(entry.status))) {
       if (!state.pending.includes(result.jobId)) state.pending.push(result.jobId);
     }
@@ -361,7 +387,12 @@ const output = path.join(dir, 'resumes', `${safe}-${String(job.id).replace(/[^a-
 function htmlEscape(value = '') { return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
 
 async function hasBlocker(page) {
-  return /captcha|verify you are human|checking your browser|security verification|robot check/i.test(await page.locator('body').innerText({ timeout: 5000 }).catch(() => ''));
+  return /captcha|verify (?:that )?you(?:'| a)?re human|checking your browser|security verification|robot check|security check|are you a robot/i.test(await page.locator('body').innerText({ timeout: 5000 }).catch(() => ''));
+}
+async function waitForHumanChallenge(page, job) {
+  console.log(`\nEl portal solicita una verificación humana: ${job.company} · ${job.role}`);
+  console.log('Resolvela vos en la pestaña abierta. El agente esperará hasta 10 minutos y continuará si la página queda habilitada. No intenta resolver ni evadir el CAPTCHA.');
+  await page.waitForFunction(() => !/captcha|verify (?:that )?you(?:'| a)?re human|checking your browser|security verification|robot check|security check|are you a robot/i.test(document.body?.innerText || ''), null, { timeout: 10 * 60 * 1000, polling: 1500 }).catch(() => {});
 }
 async function findApplicationUrl(page, job = {}) {
   const currentOrigin = new URL(page.url()).origin;
@@ -392,39 +423,73 @@ async function findApplicationUrl(page, job = {}) {
 async function hasConfirmation(page) {
   return /application (was )?submitted|thank you for applying|thanks for applying|application received|candidatura enviada|gracias por postular|recibimos tu postulación/i.test(await page.locator('body').innerText({ timeout: 5000 }).catch(() => ''));
 }
-async function openApplicationForm(page) {
+async function openApplicationForm(page, job = {}) {
   const findForm = async () => {
     const forms = page.locator('form');
     const snapshots = await forms.evaluateAll((nodes) => nodes.map((form, index) => {
       const fields = [...form.querySelectorAll('input,textarea,select')];
       const labels = fields.map((el) => [el.name, el.id, el.placeholder, el.getAttribute('aria-label'), [...(el.labels || [])].map((label) => label.innerText).join(' ')].join(' ').toLowerCase());
-      return { index, text: form.innerText.toLowerCase(), labels, hasFile: fields.some((el) => el.type === 'file' && /resume|cv|curriculum|attachment|pdf/i.test(`${el.name} ${el.accept} ${el.getAttribute('aria-label') || ''}`)), hasSubmit: Boolean(form.querySelector('button[type="submit"],input[type="submit"]')) };
+      return { index, text: form.innerText.toLowerCase(), labels, hasFile: fields.some((el) => el.type === 'file' && /resume|cv|curriculum|attachment|pdf/i.test(`${el.name} ${el.accept} ${el.getAttribute('aria-label') || ''}`)), fieldCount: fields.length };
     }));
-    const ranked = snapshots.map((form) => ({ ...form, score: (form.labels.some((text) => /e-?mail/.test(text)) ? 1 : 0) + (form.labels.some((text) => /first name|full name|applicant name|given name|nombre/.test(text)) ? 2 : 0) + (form.hasFile ? 3 : 0) + (/application|apply|candidatura|postulaci[oó]n/.test(form.text) ? 1 : 0) })).filter((form) => form.hasSubmit && form.score >= 2).sort((a, b) => b.score - a.score);
-    return ranked.length ? forms.nth(ranked[0].index) : null;
+    const ranked = snapshots.map((form) => ({ ...form, score: (form.labels.some((text) => /e-?mail/.test(text)) ? 1 : 0) + (form.labels.some((text) => /first name|full name|applicant name|given name|nombre/.test(text)) ? 2 : 0) + (form.hasFile ? 3 : 0) + (/application|apply|candidatura|postulaci[oó]n/.test(form.text) ? 2 : 0) })).filter((form) => form.fieldCount >= 2 && form.score >= 2).sort((a, b) => b.score - a.score);
+    if (ranked.length) return forms.nth(ranked[0].index);
+
+    const containers = page.locator('main,[role="main"],#application,#application-form,#app_body,[data-testid*="application"]');
+    const containerSnapshots = await containers.evaluateAll((nodes) => nodes.map((node, index) => {
+      const fields = [...node.querySelectorAll('input,textarea,select')];
+      const labels = fields.map((el) => [el.name, el.id, el.placeholder, el.getAttribute('aria-label'), [...(el.labels || [])].map((label) => label.innerText).join(' ')].join(' ').toLowerCase());
+      return { index, text: node.innerText.toLowerCase(), labels, fieldCount: fields.length, hasFile: fields.some((el) => el.type === 'file' && /resume|cv|curriculum|attachment|pdf/i.test(`${el.name} ${el.accept} ${el.getAttribute('aria-label') || ''}`)) };
+    }));
+    const app = containerSnapshots.map((node) => ({ ...node, score: (node.labels.some((text) => /e-?mail/.test(text)) ? 1 : 0) + (node.labels.some((text) => /first name|full name|applicant name|given name|nombre/.test(text)) ? 2 : 0) + (node.hasFile ? 3 : 0) + (/application|apply|candidatura|postulaci[oó]n/.test(node.text) || /\/apply(?:\/|\?|$)/i.test(page.url()) ? 2 : 0) })).filter((node) => node.fieldCount >= 2 && node.score >= 3).sort((a, b) => b.score - a.score);
+    if (app.length) return containers.nth(app[0].index);
+    return null;
   };
   let form = await findForm();
-  if (form) return form;
-  const applyLink = page.getByRole('link', { name: /apply|aplicar|postular/i }).first();
-  if (await applyLink.count()) {
-    const href = await applyLink.getAttribute('href').catch(() => null);
-    if (href) {
-      const destination = new URL(href, page.url()).href;
-      if (destination !== page.url() && new URL(destination).origin !== new URL(page.url()).origin) await page.goto(destination, { waitUntil: 'domcontentloaded', timeout: 45000 });
-    } else {
-      await applyLink.evaluate((element) => element.click()).catch(() => {});
-    }
+  if (form) return { page, form };
+  const applyLinks = await page.locator('a[href]').evaluateAll((nodes) => nodes.map((node) => ({ href: node.href, text: `${node.innerText || ''} ${node.getAttribute('aria-label') || ''} ${node.title || ''}`.trim() })));
+  const applyLink = applyLinks.find((link) => /apply|application|aplicar|postular/i.test(link.text) && /^https?:/i.test(link.href));
+  if (applyLink) {
+    const destination = new URL(applyLink.href, page.url()).href;
+    if (destination !== page.url()) await page.goto(destination, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForTimeout(1200);
   } else {
     const applyButton = page.getByRole('button', { name: /apply|aplicar|postular/i }).first();
-    if (await applyButton.count()) {
+    if (await applyButton.count() && await applyButton.isVisible().catch(() => false)) {
+      const popupPromise = page.waitForEvent('popup', { timeout: 2500 }).catch(() => null);
       await applyButton.click({ timeout: 8000 }).catch(() => {});
+      const popup = await popupPromise;
+      if (popup) {
+        await popup.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
+        if (await hasBlocker(popup)) {
+          await waitForHumanChallenge(popup, job);
+          if (await hasBlocker(popup)) return { page: popup, form: null };
+        }
+        const popupForm = await findFormOnPage(popup);
+        if (popupForm) return { page: popup, form: popupForm };
+        await popup.close().catch(() => {});
+      }
       await page.waitForTimeout(1200);
     }
   }
   form = await findForm();
   if (!form) throw new Error('No encontré un formulario de candidatura reconocible en este portal.');
-  return form;
+  return { page, form };
+}
+
+async function findFormOnPage(page) {
+  const forms = page.locator('form');
+  const count = await forms.count();
+  if (count) {
+    const ranked = await forms.evaluateAll((nodes) => nodes.map((form, index) => {
+      const fields = [...form.querySelectorAll('input,textarea,select')];
+      const labels = fields.map((el) => `${el.name} ${el.id} ${el.placeholder} ${el.getAttribute('aria-label') || ''} ${[...(el.labels || [])].map((label) => label.innerText).join(' ')}`.toLowerCase());
+      return { index, score: (labels.some((text) => /e-?mail/.test(text)) ? 1 : 0) + (labels.some((text) => /first name|full name|nombre/.test(text)) ? 2 : 0) + (fields.some((el) => el.type === 'file') ? 2 : 0) + (/application|apply|candidatura/.test(form.innerText.toLowerCase()) ? 2 : 0), count: fields.length };
+    }));
+    const best = ranked.filter((form) => form.score >= 2 && form.count >= 2).sort((a, b) => b.score - a.score)[0];
+    if (best) return forms.nth(best.index);
+  }
+  const main = page.locator('main,[role="main"],#application,#application-form,#app_body').first();
+  return await main.count() && await main.locator('input,textarea,select').count() >= 2 ? main : null;
 }
 
 function valueFor(label, p) {
@@ -437,9 +502,12 @@ function valueFor(label, p) {
   if (/last name|family name|surname|apellido/.test(text)) return p.name?.trim().split(/\s+/).slice(1).join(' ');
   if (/country|pa[ií]s/.test(text)) return p.location?.split(',').at(-1).trim();
   if (/linkedin/.test(text)) return p.linkedin || (/linkedin/i.test(p.link || '') ? p.link : '');
-  if (/portfolio|website|web site|sitio web|url/.test(text)) return p.portfolio || p.link;
+  if (/portfolio|website|web site|personal site|sitio web/.test(text)) return p.portfolio || p.link;
+  if (/postal|zip code|postcode/.test(text)) return p.postalCode || '';
+  if (/state|province|provincia/.test(text)) return p.location?.split(',').at(-2)?.trim() || '';
   if (/city|location|ubicaci[oó]n|ciudad/.test(text)) return p.location?.split(',')[0].trim();
   if (/cover letter|carta de presentaci[oó]n|professional summary|resumen profesional/.test(text)) return p.summary || '';
+  if (/website|url|link/.test(text)) return p.link || '';
   return '';
 }
 
@@ -474,15 +542,16 @@ async function fillKnownFields(form, p, cvPath) {
       }
       continue;
     }
-    const label = await field.evaluate((el) => [el.labels ? [...el.labels].map((item) => item.innerText).join(' ') : '', el.closest('.application-question')?.innerText || '', el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || '', el.getAttribute('name') || '', el.id || ''].join(' '));
+    const label = await field.evaluate((el) => [el.labels ? [...el.labels].map((item) => item.innerText).join(' ') : '', el.closest('.application-question,fieldset,[role="group"]')?.innerText || '', el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || '', el.getAttribute('name') || '', el.id || ''].join(' '));
     const mapped = valueFor(label, p);
     if (mapped && type !== 'file' && await field.inputValue().catch(() => '') === '') {
       if (await field.evaluate((el) => el.tagName === 'SELECT')) {
         const optionLabels = await field.locator('option').allTextContents().catch(() => []);
         const country = p.location?.split(',').at(-1).trim();
-        const option = /which location are you applying for/i.test(label) && country
+        const option = ( /which location are you applying for|country|pa[ií]s/i.test(label) && country
           ? optionLabels.find((item) => normalizeAnswer(item).includes(normalizeAnswer(country)))
-          : optionLabels.find((item) => normalizeAnswer(item) === normalizeAnswer(mapped));
+          : optionLabels.find((item) => normalizeAnswer(item) === normalizeAnswer(mapped)) ) || ( /city|location|ubicaci[oó]n|ciudad/i.test(label)
+          ? optionLabels.find((item) => normalizeAnswer(item).includes(normalizeAnswer(p.location?.split(',')[0] || ''))) : null );
         if (option) await field.selectOption({ label: option }, { timeout: 1500 }).catch(() => {});
       } else {
         await field.fill(mapped, { timeout: 1500 }).catch(() => {});
