@@ -7,5 +7,7 @@ config.js
 /dist/
 /node_modules/
 /.postula-agent/
+/.taste-skill/
+/work/
 postula-agent-config.json
 postula-agent-batch.json

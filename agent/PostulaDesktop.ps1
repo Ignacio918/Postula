@@ -1,0 +1,357 @@
+﻿param([string]$Config = ".postula-agent\postula-agent-config.json")
+
+$ErrorActionPreference = 'Stop'
+$script:RepoRoot = Split-Path -Parent $PSScriptRoot
+Set-Location -LiteralPath $script:RepoRoot
+$script:ConfigPath = if ([System.IO.Path]::IsPathRooted($Config)) { $Config } else { Join-Path $script:RepoRoot $Config }
+$script:ApiBase = 'http://127.0.0.1:4179'
+$script:AgentProcess = $null
+$script:OwnsAgent = $false
+$script:LastData = $null
+
+Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Xaml
+
+$xamlText = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Postula · Agente" Height="850" Width="1220" MinHeight="700" MinWidth="900"
+        WindowStartupLocation="CenterScreen" Background="#F4F3F1" FontFamily="Segoe UI">
+  <Window.Resources>
+    <Style TargetType="Button">
+      <Setter Property="Foreground" Value="#171715"/><Setter Property="Background" Value="#FFFFFF"/>
+      <Setter Property="BorderBrush" Value="#DCDAD6"/><Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="13,8"/><Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="buttonBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="buttonBorder" Property="Background" Value="#F1F0EE"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="buttonBorder" Property="Opacity" Value="0.55"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+      <Setter Property="Foreground" Value="#FFFFFF"/><Setter Property="Background" Value="#1D1F20"/><Setter Property="BorderBrush" Value="#1D1F20"/>
+    </Style>
+  </Window.Resources>
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Height="66" Background="#F4F3F1" BorderBrush="#E5E3DF" BorderThickness="0,0,0,1">
+      <Grid Margin="28,0">
+        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBlock Text="postula." FontSize="20" FontWeight="Bold" Foreground="#171715" VerticalAlignment="Center"/>
+          <Border Width="1" Height="22" Background="#DCDAD6" Margin="14,0"/>
+          <TextBlock Text="AGENTE DE ESCRITORIO" FontSize="11" Foreground="#5F5D59" VerticalAlignment="Center"/>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+          <Ellipse x:Name="ConnectionDot" Width="8" Height="8" Fill="#9A978F" Margin="0,0,8,0"/>
+          <TextBlock x:Name="ConnectionLabel" Text="Conectando…" FontSize="12" Foreground="#5F5D59" VerticalAlignment="Center" Margin="0,0,18,0"/>
+          <Button x:Name="AgentToggle" Content="Detener agente" MinWidth="120"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Margin="28,23,28,30">
+        <Grid Margin="0,0,0,19">
+          <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel>
+            <TextBlock Text="Actividad del agente" FontSize="25" FontWeight="SemiBold" Foreground="#171715"/>
+            <TextBlock Text="Seguimiento local de ofertas, formularios y candidaturas confirmadas." FontSize="13" Foreground="#5F5D59" Margin="0,5,0,0"/>
+          </StackPanel>
+          <TextBlock x:Name="UpdatedLabel" Grid.Column="1" Text="Esperando datos" FontSize="12" Foreground="#5F5D59" VerticalAlignment="Bottom"/>
+        </Grid>
+
+        <Border Background="#FFFFFF" BorderBrush="#E5E3DF" BorderThickness="1" CornerRadius="8" Padding="0" Margin="0,0,0,16">
+          <Grid Height="62">
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock x:Name="Step1Index" Text="1" FontSize="12" Foreground="#1D5FBF" Margin="0,0,9,0"/><TextBlock x:Name="Step1" Text="Buscar ofertas" FontSize="13" Foreground="#171715"/></StackPanel>
+            <Border Grid.Column="1" Background="#EEEBE8"/>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock x:Name="Step2Index" Text="2" FontSize="12" Foreground="#6B6964" Margin="0,0,9,0"/><TextBlock x:Name="Step2" Text="Validar encaje" FontSize="13" Foreground="#6B6964"/></StackPanel>
+            <Border Grid.Column="3" Background="#EEEBE8"/>
+            <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock x:Name="Step3Index" Text="3" FontSize="12" Foreground="#6B6964" Margin="0,0,9,0"/><TextBlock x:Name="Step3" Text="Completar solicitud" FontSize="13" Foreground="#6B6964"/></StackPanel>
+            <Border Grid.Column="5" Background="#EEEBE8"/>
+            <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock x:Name="Step4Index" Text="4" FontSize="12" Foreground="#6B6964" Margin="0,0,9,0"/><TextBlock x:Name="Step4" Text="Confirmar y enviar" FontSize="13" Foreground="#6B6964"/></StackPanel>
+          </Grid>
+        </Border>
+
+        <Border Background="#FFFFFF" BorderBrush="#E5E3DF" BorderThickness="1" CornerRadius="8" Margin="0,0,0,22">
+          <Grid>
+            <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/></Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="18,14"><TextBlock Text="Ofertas vistas" FontSize="13" Foreground="#5F5D59"/><TextBlock x:Name="MetricProcessed" Text="0" FontSize="25" Foreground="#171715" Margin="0,3,0,0"/><TextBlock Text="desde que inició el agente" FontSize="12" Foreground="#6B6964" Margin="0,2,0,0"/></StackPanel>
+            <Border Grid.Column="1" Background="#EEEBE8"/>
+            <StackPanel Grid.Column="2" Margin="18,14"><TextBlock Text="Compatibles en este ciclo" FontSize="13" Foreground="#5F5D59"/><TextBlock x:Name="MetricMatched" Text="0" FontSize="25" Foreground="#171715" Margin="0,3,0,0"/><TextBlock Text="con el encaje configurado" FontSize="12" Foreground="#6B6964" Margin="0,2,0,0"/></StackPanel>
+            <Border Grid.Column="3" Background="#EEEBE8"/>
+            <StackPanel Grid.Column="4" Margin="18,14"><TextBlock Text="Formularios listos" FontSize="13" Foreground="#5F5D59"/><TextBlock x:Name="MetricReady" Text="0" FontSize="25" Foreground="#171715" Margin="0,3,0,0"/><TextBlock Text="esperando una confirmación" FontSize="12" Foreground="#6B6964" Margin="0,2,0,0"/></StackPanel>
+            <Border Grid.Column="5" Background="#EEEBE8"/>
+            <StackPanel Grid.Column="6" Margin="18,14"><TextBlock Text="Postulaciones confirmadas" FontSize="13" Foreground="#5F5D59"/><TextBlock x:Name="MetricSubmitted" Text="0" FontSize="25" Foreground="#171715" Margin="0,3,0,0"/><TextBlock Text="el portal mostró confirmación" FontSize="12" Foreground="#6B6964" Margin="0,2,0,0"/></StackPanel>
+          </Grid>
+        </Border>
+
+        <Grid>
+          <Grid.ColumnDefinitions><ColumnDefinition Width="1.55*"/><ColumnDefinition Width="20"/><ColumnDefinition Width="1*"/></Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <Border Background="#FFFFFF" BorderBrush="#E5E3DF" BorderThickness="1" CornerRadius="8" Margin="0,0,0,18">
+              <StackPanel>
+                <Grid Margin="18,15,18,12"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Ahora" FontSize="15" FontWeight="SemiBold" Foreground="#171715"/><TextBlock x:Name="PhaseLabel" Text="Leyendo el estado del agente" FontSize="12" Foreground="#5F5D59" Margin="0,3,0,0"/></StackPanel><TextBlock x:Name="WorkLabel" Grid.Column="1" Text="En espera" FontSize="12" Foreground="#247B50" VerticalAlignment="Center"/></Grid>
+                <Border Height="1" Background="#EEEBE8" Margin="18,0"/>
+                <StackPanel Margin="18,13,18,18"><TextBlock x:Name="CurrentStage" Text="Esperando actividad" FontSize="14" FontWeight="SemiBold" Foreground="#171715"/><Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock x:Name="CurrentRole" Text="Todavía no hay una oferta en revisión." FontSize="14" Foreground="#171715" TextWrapping="Wrap"/><TextBlock x:Name="CurrentCompany" Text="" FontSize="12" Foreground="#5F5D59" Margin="0,3,0,0"/></StackPanel><TextBlock x:Name="CurrentMatch" Grid.Column="1" Text="" FontSize="12" Foreground="#5F5D59" VerticalAlignment="Top" Margin="16,0,0,0"/></Grid></StackPanel>
+              </StackPanel>
+            </Border>
+            <Border Background="#FFFFFF" BorderBrush="#E5E3DF" BorderThickness="1" CornerRadius="8">
+              <StackPanel><StackPanel Margin="18,15,18,11"><TextBlock Text="Actividad reciente" FontSize="15" FontWeight="SemiBold" Foreground="#171715"/><TextBlock Text="Resultado por oferta procesada" FontSize="12" Foreground="#5F5D59" Margin="0,3,0,0"/></StackPanel><Border Height="1" Background="#EEEBE8" Margin="18,0,18,0"/><StackPanel x:Name="RecentHost" Margin="18,4,18,8"><TextBlock Text="Todavía no se procesaron ofertas." FontSize="13" Foreground="#5F5D59" Margin="0,10"/></StackPanel></StackPanel>
+            </Border>
+          </StackPanel>
+
+          <StackPanel Grid.Column="2">
+            <Border x:Name="ApprovalCard" Background="#FFFFFF" BorderBrush="#1D5FBF" BorderThickness="1,2,1,1" CornerRadius="8" Margin="0,0,0,18">
+              <StackPanel><StackPanel Margin="18,15,18,11"><TextBlock Text="Listas para enviar" FontSize="15" FontWeight="SemiBold" Foreground="#171715"/><TextBlock Text="Revisá la empresa y el puesto antes de cada envío." FontSize="12" Foreground="#5F5D59" Margin="0,3,0,0" TextWrapping="Wrap"/></StackPanel><Border Height="1" Background="#EEEBE8" Margin="18,0,18,0"/><StackPanel x:Name="ApprovalHost" Margin="18,12,18,18"><TextBlock Text="No hay formularios esperando confirmación." FontSize="13" Foreground="#5F5D59" TextWrapping="Wrap"/></StackPanel></StackPanel>
+            </Border>
+            <Border Background="#FFFFFF" BorderBrush="#E5E3DF" BorderThickness="1" CornerRadius="8" Padding="18">
+              <StackPanel><TextBlock Text="Cómo opera" FontSize="15" FontWeight="SemiBold" Foreground="#171715"/><TextBlock Text="Tus datos se procesan localmente en esta computadora." FontSize="12" Foreground="#5F5D59" Margin="0,3,0,10"/><TextBlock Text="La búsqueda y la adaptación del CV usan reglas locales, sin tokens de OpenAI. Si falta un dato o aparece un CAPTCHA, el agente pausa esa oferta para que la revises." FontSize="12" Foreground="#5F5D59" TextWrapping="Wrap"/></StackPanel>
+            </Border>
+          </StackPanel>
+        </Grid>
+        <TextBlock Text="Postula · Agente de escritorio · tu perfil y tu CV no se suben al panel" FontSize="11" Foreground="#6B6964" Margin="1,18,0,0"/>
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</Window>
+'@
+
+if (-not (Test-Path -LiteralPath $script:ConfigPath)) {
+  [System.Windows.MessageBox]::Show("No encuentro el perfil local:`n$($script:ConfigPath)`n`nGuardá postula-agent-config.json dentro de .postula-agent e iniciá de nuevo.", 'Postula', 'OK', 'Warning') | Out-Null
+  exit 1
+}
+if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
+  [System.Windows.MessageBox]::Show('Instalá Node.js 20 o superior para ejecutar Postula.', 'Postula', 'OK', 'Error') | Out-Null
+  exit 1
+}
+
+[xml]$xaml = $xamlText
+$reader = New-Object System.Xml.XmlNodeReader $xaml
+$window = [Windows.Markup.XamlReader]::Load($reader)
+$script:ConnectionDot = $window.FindName('ConnectionDot')
+$script:ConnectionLabel = $window.FindName('ConnectionLabel')
+$script:UpdatedLabel = $window.FindName('UpdatedLabel')
+$script:PhaseLabel = $window.FindName('PhaseLabel')
+$script:WorkLabel = $window.FindName('WorkLabel')
+$script:CurrentStage = $window.FindName('CurrentStage')
+$script:CurrentRole = $window.FindName('CurrentRole')
+$script:CurrentCompany = $window.FindName('CurrentCompany')
+$script:CurrentMatch = $window.FindName('CurrentMatch')
+$script:MetricProcessed = $window.FindName('MetricProcessed')
+$script:MetricMatched = $window.FindName('MetricMatched')
+$script:MetricReady = $window.FindName('MetricReady')
+$script:MetricSubmitted = $window.FindName('MetricSubmitted')
+$script:RecentHost = $window.FindName('RecentHost')
+$script:ApprovalHost = $window.FindName('ApprovalHost')
+$script:AgentToggle = $window.FindName('AgentToggle')
+$script:Steps = @(
+  $window.FindName('Step1'), $window.FindName('Step2'), $window.FindName('Step3'), $window.FindName('Step4'),
+  $window.FindName('Step1Index'), $window.FindName('Step2Index'), $window.FindName('Step3Index'), $window.FindName('Step4Index')
+)
+$script:InkBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#171715')
+$script:MutedBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#6B6964')
+$script:BlueBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#1D5FBF')
+$script:GreenBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#247B50')
+$script:GrayBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#9A978F')
+
+function Test-AgentApi {
+  try { Invoke-RestMethod -Uri "$($script:ApiBase)/api/status" -TimeoutSec 2 | Out-Null; return $true } catch { return $false }
+}
+
+function Start-PostulaAgent {
+  if (Test-AgentApi) { return }
+  $node = (Get-Command node.exe).Source
+  $logDirectory = Join-Path $script:RepoRoot '.postula-agent'
+  New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+  $stdout = Join-Path $logDirectory 'desktop-agent.log'
+  $stderr = Join-Path $logDirectory 'desktop-agent-error.log'
+  $argumentLine = "agent/runner.mjs `"$($script:ConfigPath)`""
+  $script:AgentProcess = Start-Process -FilePath $node -ArgumentList $argumentLine -WorkingDirectory $script:RepoRoot -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
+  $script:OwnsAgent = $true
+}
+
+function Invoke-PostulaApi([string]$Route, $Payload = $null) {
+  $parameters = @{ Uri = "$($script:ApiBase)$Route"; Method = 'Post'; TimeoutSec = 5; ContentType = 'application/json' }
+  if ($null -ne $Payload) { $parameters.Body = $Payload | ConvertTo-Json -Compress }
+  Invoke-RestMethod @parameters
+}
+
+function Get-StatusLabel([string]$status) {
+  switch ($status) {
+    'submitted' { 'Enviada y confirmada' }
+    'submitted_unconfirmed' { 'Enviada · sin confirmación visible' }
+    'ready_to_submit' { 'Lista para revisar' }
+    'needs_attention' { 'Requiere tu atención' }
+    'no_application_form' { 'Sin formulario compatible' }
+    'excluded' { 'Excluida por vos' }
+    'error' { 'Error' }
+    default { $status }
+  }
+}
+
+function Set-Pipeline([string]$stage, [string]$phase) {
+  $normalized = "$stage $phase".ToLowerInvariant()
+  $active = 1
+  if ($normalized -match 'validar|encaje|abriendo publicaci|preparando cv|revisando ofertas') { $active = 2 }
+  if ($normalized -match 'formulario|solicitud|captcha|verificaci[oó]n') { $active = 3 }
+  if ($normalized -match 'confirmaci[oó]n|enviando|confirmada por el portal') { $active = 4 }
+  $textSteps = @($window.FindName('Step1'), $window.FindName('Step2'), $window.FindName('Step3'), $window.FindName('Step4'))
+  $indexSteps = @($window.FindName('Step1Index'), $window.FindName('Step2Index'), $window.FindName('Step3Index'), $window.FindName('Step4Index'))
+  for ($i = 0; $i -lt 4; $i++) {
+    $brush = if (($i + 1) -le $active) { $script:BlueBrush } else { $script:MutedBrush }
+    $textSteps[$i].Foreground = $brush
+    $indexSteps[$i].Foreground = $brush
+  }
+}
+
+function Render-Recent($items) {
+  $script:RecentHost.Children.Clear()
+  $visibleItems = @($items | Select-Object -First 5)
+  if ($visibleItems.Count -eq 0) {
+    $empty = New-Object System.Windows.Controls.TextBlock
+    $empty.Text = 'Todavía no se procesaron ofertas.'; $empty.FontSize = 13; $empty.Foreground = $script:MutedBrush; $empty.Margin = '0,9,0,9'
+    [void]$script:RecentHost.Children.Add($empty); return
+  }
+  foreach ($item in $visibleItems) {
+    $row = New-Object System.Windows.Controls.Grid
+    $row.Margin = '0,7,0,7'
+    [void]$row.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
+    $statusColumn = New-Object System.Windows.Controls.ColumnDefinition; $statusColumn.Width = [System.Windows.GridLength]::Auto; [void]$row.ColumnDefinitions.Add($statusColumn)
+    $title = New-Object System.Windows.Controls.StackPanel
+    $role = New-Object System.Windows.Controls.TextBlock; $role.Text = [string]$item.role; $role.FontSize = 13; $role.FontWeight = 'SemiBold'; $role.Foreground = $script:InkBrush; $role.TextTrimming = 'CharacterEllipsis'
+    $company = New-Object System.Windows.Controls.TextBlock; $company.Text = "$($item.company) · $($item.source)"; $company.FontSize = 12; $company.Foreground = $script:MutedBrush; $company.Margin = '0,2,0,0'
+    [void]$title.Children.Add($role); [void]$title.Children.Add($company)
+    [void]$row.Children.Add($title)
+    $badge = New-Object System.Windows.Controls.TextBlock; $badge.Text = Get-StatusLabel ([string]$item.status); $badge.FontSize = 11; $badge.Foreground = $script:MutedBrush; $badge.Margin = '14,3,0,0'; $badge.ToolTip = [string]$item.reason
+    [System.Windows.Controls.Grid]::SetColumn($badge, 1); [void]$row.Children.Add($badge)
+    $rule = New-Object System.Windows.Controls.Border; $rule.Height = 1; $rule.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#EEEBE8'); $rule.Margin = '0,0,0,0'
+    $cell = New-Object System.Windows.Controls.StackPanel; [void]$cell.Children.Add($row); [void]$cell.Children.Add($rule)
+    [void]$script:RecentHost.Children.Add($cell)
+  }
+}
+
+function Render-Approvals($items) {
+  $script:ApprovalHost.Children.Clear()
+  if (@($items).Count -eq 0) {
+    $empty = New-Object System.Windows.Controls.TextBlock
+    $empty.Text = 'No hay formularios esperando confirmación.'; $empty.FontSize = 13; $empty.Foreground = $script:MutedBrush; $empty.TextWrapping = 'Wrap'
+    [void]$script:ApprovalHost.Children.Add($empty); return
+  }
+  foreach ($item in $items) {
+    $pendingItem = $item
+    $card = New-Object System.Windows.Controls.StackPanel
+    $role = New-Object System.Windows.Controls.TextBlock; $role.Text = [string]$pendingItem.role; $role.FontSize = 14; $role.FontWeight = 'SemiBold'; $role.Foreground = $script:InkBrush; $role.TextWrapping = 'Wrap'
+    $company = New-Object System.Windows.Controls.TextBlock; $company.Text = "$($pendingItem.company) · $($pendingItem.source)"; $company.FontSize = 12; $company.Foreground = $script:MutedBrush; $company.Margin = '0,3,0,0'
+    $match = New-Object System.Windows.Controls.TextBlock; $match.Text = "Encaje estimado: $($pendingItem.match)% · el formulario queda abierto en Chromium."; $match.FontSize = 12; $match.Foreground = $script:MutedBrush; $match.Margin = '0,10,0,12'; $match.TextWrapping = 'Wrap'
+    $actions = New-Object System.Windows.Controls.StackPanel; $actions.Orientation = 'Horizontal'
+    $review = New-Object System.Windows.Controls.Button; $review.Content = 'Ver formulario abierto'; $review.Margin = '0,0,8,0'; $review.Add_Click({ try { Invoke-PostulaApi '/api/focus' | Out-Null } catch { [System.Windows.MessageBox]::Show('El formulario ya no está abierto.', 'Postula') | Out-Null } }.GetNewClosure())
+    $send = New-Object System.Windows.Controls.Button; $send.Content = 'Confirmar y enviar'; $send.Style = $window.FindResource('PrimaryButton')
+    $send.Add_Click({
+      $confirmationText = "Esto enviará tu CV y los datos de tu perfil a $($pendingItem.company) para el puesto $($pendingItem.role).`n`n¿Confirmás el envío?"
+      $choice = [System.Windows.MessageBox]::Show($confirmationText, 'Confirmar postulación', 'YesNo', 'Warning')
+      if ($choice -ne 'Yes') { return }
+      $send.IsEnabled = $false
+      try { Invoke-PostulaApi '/api/approve' @{ jobId = [string]$pendingItem.jobId } | Out-Null; $send.Content = 'Envío autorizado' }
+      catch { $send.IsEnabled = $true; $send.Content = 'Confirmar y enviar'; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Postula') | Out-Null }
+    }.GetNewClosure())
+    [void]$actions.Children.Add($review); [void]$actions.Children.Add($send)
+    $note = New-Object System.Windows.Controls.TextBlock; $note.Text = "Al confirmar, Postula enviará esta candidatura a $($pendingItem.company)."; $note.FontSize = 12; $note.Foreground = $script:MutedBrush; $note.TextWrapping = 'Wrap'; $note.Margin = '0,9,0,0'
+    [void]$card.Children.Add($role); [void]$card.Children.Add($company); [void]$card.Children.Add($match); [void]$card.Children.Add($actions); [void]$card.Children.Add($note)
+    [void]$script:ApprovalHost.Children.Add($card)
+  }
+}
+
+function Update-Window($data) {
+  $script:LastData = $data
+  $script:ConnectionDot.Fill = $script:GreenBrush
+  $script:ConnectionLabel.Text = 'Agente conectado'
+  $script:UpdatedLabel.Text = 'Actualizado ' + (Get-Date).ToString('HH:mm:ss')
+  $status = $data.status
+  $processed = 0
+  if ($null -ne $data.totals.processed) { $processed = $data.totals.processed }
+  $matched = 0
+  if ($null -ne $status.matched) { $matched = $status.matched }
+  $submitted = 0
+  if ($null -ne $data.totals.submitted) { $submitted = $data.totals.submitted }
+  $phase = [string]$status.phase
+  if ([string]::IsNullOrWhiteSpace($phase)) { $phase = 'En espera' }
+  $script:MetricProcessed.Text = [string]$processed
+  $script:MetricMatched.Text = [string]$matched
+  $script:MetricReady.Text = [string](@($data.pendingApprovals).Count)
+  $script:MetricSubmitted.Text = [string]$submitted
+  $script:PhaseLabel.Text = $phase
+  $isWorking = $status.phase -match 'buscando|revisando|completando|enviando|esperando tu confirmaci[oó]n|verificaci[oó]n'
+  $script:WorkLabel.Text = if ($isWorking) { 'Trabajando' } else { 'En espera' }
+  $script:WorkLabel.Foreground = if ($isWorking) { $script:BlueBrush } else { $script:GreenBrush }
+  $job = $status.currentJob
+  if ($job) {
+    $script:CurrentStage.Text = [string]$job.stage
+    $script:CurrentRole.Text = [string]$job.role
+    $script:CurrentCompany.Text = [string]$job.company
+    $script:CurrentMatch.Text = if ($job.match) { "$($job.match)% de encaje" } else { '' }
+  } else {
+    $script:CurrentStage.Text = if ($phase -eq 'En espera') { 'Esperando actividad' } else { $phase }
+    $script:CurrentRole.Text = if ($status.error) { [string]$status.error } else { 'No hay una oferta abierta en este momento.' }
+    $script:CurrentCompany.Text = if ($status.nextRunAt) { 'Próxima búsqueda: ' + ([DateTime]::Parse($status.nextRunAt).ToLocalTime().ToString('HH:mm')) } else { '' }
+    $script:CurrentMatch.Text = ''
+  }
+  Set-Pipeline ([string]$job.stage) ([string]$status.phase)
+  Render-Recent $data.recent
+  Render-Approvals $data.pendingApprovals
+  if ($script:AgentProcess -and $script:AgentProcess.HasExited) { $script:OwnsAgent = $false; $script:AgentProcess = $null }
+  $script:AgentToggle.Content = 'Detener agente'
+}
+
+try { Start-PostulaAgent } catch {
+  [System.Windows.MessageBox]::Show("No pude iniciar el agente:`n$($_.Exception.Message)", 'Postula', 'OK', 'Error') | Out-Null
+}
+
+$toggleClick = {
+  if (Test-AgentApi) {
+    try { Invoke-PostulaApi '/api/stop' | Out-Null } catch {}
+    $script:AgentToggle.IsEnabled = $false
+    $script:AgentToggle.Content = 'Deteniendo…'
+    if ($script:OwnsAgent) { $script:OwnsAgent = $false }
+  } else {
+    try { Start-PostulaAgent; $script:AgentToggle.Content = 'Iniciando…' } catch { [System.Windows.MessageBox]::Show($_.Exception.Message, 'Postula') | Out-Null }
+  }
+}.GetNewClosure()
+$script:AgentToggle.Add_Click($toggleClick)
+
+$timer = New-Object System.Windows.Threading.DispatcherTimer
+$timer.Interval = [TimeSpan]::FromSeconds(2)
+$timer.Add_Tick({
+  try {
+    $data = Invoke-RestMethod -Uri "$($script:ApiBase)/api/status" -TimeoutSec 2
+    Update-Window $data
+    $script:AgentToggle.IsEnabled = $true
+  } catch {
+    $script:ConnectionDot.Fill = $script:GrayBrush
+    $script:ConnectionLabel.Text = 'Agente desconectado'
+    $script:UpdatedLabel.Text = 'La ventana sigue abierta'
+    $script:PhaseLabel.Text = 'Agente detenido'
+    $script:WorkLabel.Text = 'En espera'
+    $script:CurrentStage.Text = 'Inactivo'
+    $script:CurrentRole.Text = 'Iniciá el agente para volver a buscar.'
+    $script:CurrentCompany.Text = ''
+    $script:CurrentMatch.Text = ''
+    $script:MetricReady.Text = '0'
+    $script:AgentToggle.Content = 'Iniciar agente'
+    $script:AgentToggle.IsEnabled = $true
+  }
+})
+$window.Add_Closed({
+  $timer.Stop()
+  if ($script:OwnsAgent -and $script:AgentProcess -and -not $script:AgentProcess.HasExited) {
+    try { Invoke-PostulaApi '/api/stop' | Out-Null } catch {}
+    for ($i = 0; $i -lt 20 -and -not $script:AgentProcess.HasExited; $i++) { Start-Sleep -Milliseconds 250 }
+    if (-not $script:AgentProcess.HasExited) { Stop-Process -Id $script:AgentProcess.Id -Force -ErrorAction SilentlyContinue }
+  }
+})
+$timer.Start()
+[void]$window.ShowDialog()

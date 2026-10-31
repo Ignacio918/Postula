@@ -1,9 +1,13 @@
 import { chromium } from 'playwright';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { createServer } from 'node:http';
+import { mkdir, open, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import { promisify } from 'node:util';
 
 const input = process.argv[2];
+const execFileAsync = promisify(execFile);
 if (!input) {
   console.error('Uso: npm run agent -- <postula-agent-config.json | postula-agent-batch.json>');
   process.exit(2);
@@ -19,17 +23,24 @@ const minimumMatch = Number(settings.minimumMatch || payload.autoThreshold || 80
 const dailyLimit = Math.max(1, Math.min(20, Number(settings.dailyLimit || payload.dailyLimit || 5)));
 const stateFile = path.join(workDir, 'state.json');
 const resultFile = path.join(workDir, 'results.json');
+const statusFile = path.join(workDir, 'status.json');
 const state = await readJson(stateFile, { applied: [], attempted: [], discovered: [], date: '', submittedToday: 0, attemptedToday: 0 });
 state.applied ||= [];
 state.attempted ||= [];
 state.pending ||= [];
 state.discovered ||= [];
 state.retryQueue ||= [];
+state.excluded ||= [];
 for (const application of payload.applications || []) {
   if (application.jobId && ['Enviada', 'Entrevista', 'Seguimiento'].includes(application.status) && !state.applied.includes(application.jobId)) state.applied.push(application.jobId);
 }
 const isBatch = Array.isArray(payload.jobs) && payload.jobs.length > 0;
 const intervalMinutes = Math.max(15, Math.min(1440, Number(settings.intervalMinutes || 30)));
+const approvalRequests = new Map();
+const approvedApplications = new Set();
+let liveStatus = { phase: 'Iniciando', jobsFound: 0, matched: 0, currentJob: null, updatedAt: new Date().toISOString() };
+let activeApplicationPage = null;
+let keepRunning = true;
 const stop = new Set('the and for with from that this your you our are can will have has into about role work team experience design designer product user users their they them as an a to of in on or is be we it by at across using use years strong ability skills what who all not'.split(' '));
 
 if (!profile.name || !profile.email || !profile.roles || !(profile.resume || profile.experience)) {
@@ -39,20 +50,24 @@ if (!profile.name || !profile.email || !profile.roles || !(profile.resume || pro
 
 await mkdir(workDir, { recursive: true });
 await mkdir(path.join(workDir, 'resumes'), { recursive: true });
+const releaseRunnerLock = await claimRunnerLock(workDir);
+const dashboardServer = await startDashboard();
+const dashboardPort = Number(process.env.POSTULA_DASHBOARD_PORT || 4179);
 const context = await chromium.launchPersistentContext(path.join(workDir, 'browser-profile'), {
   headless: false,
   viewport: null,
   args: ['--start-maximized'],
 });
 const pdfBrowser = await chromium.launch({ headless: true });
-let keepRunning = true;
 while (keepRunning) {
   const today = localDate();
   if (state.date !== today) Object.assign(state, { date: today, submittedToday: 0, attemptedToday: 0 });
   let jobs;
+  await setLiveStatus({ phase: 'Buscando ofertas', currentJob: null, startedAt: new Date().toISOString() });
   try { jobs = isBatch ? payload.jobs : await discoverJobs(profile); }
   catch (error) {
     console.error(`No pude consultar las fuentes: ${error.message || error}`);
+    await setLiveStatus({ phase: 'Error al consultar fuentes', error: String(error?.message || error), currentJob: null });
     if (isBatch) break;
     await wait(intervalMinutes);
     continue;
@@ -72,21 +87,24 @@ while (keepRunning) {
   const candidates = jobs
     .filter((job) => inScope(job, profile))
     .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
-    .filter((job) => job.match >= minimumMatch && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && (state.retryQueue.includes(job.id) || (!state.pending.includes(job.id) && !state.discovered.includes(job.id))))
+    .filter((job) => job.match >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && (state.retryQueue.includes(job.id) || (!state.pending.includes(job.id) && !state.discovered.includes(job.id))))
     .sort((a, b) => b.match - a.match)
     .slice(0, state.retryQueue.length ? 3 : 30);
   const cycleResults = [];
-  const matchCount = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.applied.includes(job.id)).length;
+  const matchCount = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id)).length;
+  await setLiveStatus({ phase: candidates.length ? 'Revisando ofertas compatibles' : 'Búsqueda en curso', jobsFound: jobs.length, matched: matchCount, currentJob: null, error: '' });
   if (!candidates.length) console.log(`Ciclo completo · ${matchCount} ofertas coinciden con tu perfil; ninguna nueva para revisar.`);
   else console.log(`Agente Postula · ${candidates.length} ofertas nuevas · ${matchCount} compatibles · encaje mínimo ${minimumMatch}% · máximo ${dailyLimit} envíos/día`);
 
   const pendingPages = [];
   for (const job of candidates) {
+  await setLiveStatus({ currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Abriendo publicación' } });
   const result = { jobId: job.id, source: job.source, company: job.company, role: job.role, url: job.url, match: job.match, at: new Date().toISOString() };
   state.discovered.push(job.id);
   let page;
   try {
     page = await context.newPage();
+    await setLiveStatus({ currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Preparando CV para el puesto' } });
     const cvPath = await createResumePdf(pdfBrowser, job, profile, workDir);
     await page.goto(job.listingUrl || job.url, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForTimeout(1500);
@@ -106,7 +124,8 @@ while (keepRunning) {
       const form = application.form;
       result.url = page.url();
       if (!form) throw new Error('No encontré un formulario de candidatura reconocible en este portal.');
-      const filled = await fillKnownFields(form, profile, cvPath);
+      await setLiveStatus({ currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Completando formulario' } });
+      const filled = await fillKnownFields(form, profile, cvPath, job);
       if (await hasBlocker(page)) {
         result.status = 'needs_attention';
         result.reason = 'El sitio requiere verificación manual.';
@@ -124,14 +143,16 @@ while (keepRunning) {
           result.reason = 'No pude identificar un único botón de envío seguro.';
         } else {
           if (state.attemptedToday >= dailyLimit) {
-            result.status = 'ready_to_submit';
-            result.reason = `Formulario completo; se alcanzó el máximo de ${dailyLimit} envíos de hoy. Revisalo en la pestaña abierta.`;
+            result.status = 'needs_attention';
+            result.reason = `Formulario completo, pero ya se alcanzó el máximo de ${dailyLimit} envíos de hoy.`;
           } else {
-          const approved = await confirmSubmission(job, page);
+          await setLiveStatus({ currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Formulario listo · esperando tu confirmación' } });
+          const approved = await requestDashboardApproval(job, page);
           if (!approved) {
             result.status = 'ready_to_submit';
-            result.reason = 'Formulario completo; falta confirmación manual para enviar la postulación.';
+            result.reason = 'Formulario completo; quedó pendiente la confirmación desde el panel local.';
           } else {
+            await setLiveStatus({ phase: 'Enviando candidatura confirmada', currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Enviando formulario' } });
             state.attempted.push(job.id);
             state.attemptedToday += 1;
             await writeFile(stateFile, JSON.stringify(state, null, 2));
@@ -144,6 +165,7 @@ while (keepRunning) {
               result.status = 'submitted';
               state.applied.push(job.id);
               state.submittedToday += 1;
+              await setLiveStatus({ currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Postulación confirmada por el portal' } });
             } else {
               result.status = 'submitted_unconfirmed';
               result.reason = 'Se envió el formulario, pero el portal no mostró una confirmación reconocible. Revisá la página abierta.';
@@ -172,6 +194,7 @@ while (keepRunning) {
   cycleResults.push(result);
   await writeFile(stateFile, JSON.stringify(state, null, 2));
   await writeFile(resultFile, JSON.stringify({ date: today, results }, null, 2));
+  await setLiveStatus({ latestResult: { company: result.company, role: result.role, status: result.status, at: result.at }, currentJob: null, totalResults: results.length });
   console.log(`${result.status.padEnd(22)} [${job.source || 'bolsa'}] ${job.company} · ${job.role}${result.reason ? ` — ${result.reason}` : ''}`);
     if (page && ['needs_attention', 'ready_to_submit', 'submitted_unconfirmed'].includes(result.status)) {
       pendingPages.push(page);
@@ -184,6 +207,7 @@ while (keepRunning) {
       if (!state.pending.includes(result.jobId)) state.pending.push(result.jobId);
     }
     await writeFile(stateFile, JSON.stringify(state, null, 2));
+    await setLiveStatus({ phase: 'Esperando la próxima búsqueda', currentJob: null, nextRunAt: new Date(Date.now() + intervalMinutes * 60 * 1000).toISOString() });
     if (isBatch) keepRunning = false;
   }
   if (isBatch) keepRunning = false;
@@ -195,31 +219,171 @@ while (keepRunning) {
 }
 await pdfBrowser.close();
 await context.close();
+await closeDashboard(dashboardServer);
+await releaseRunnerLock();
 console.log(`Resultado local: ${resultFile}`);
 
 async function readJson(file, fallback) {
   try { return JSON.parse(await readFile(file, 'utf8')); } catch { return fallback; }
 }
 
-async function wait(minutes) { await new Promise((resolve) => setTimeout(resolve, minutes * 60 * 1000)); }
+async function wait(minutes) {
+  const until = Date.now() + minutes * 60 * 1000;
+  while (keepRunning && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, Math.min(1000, until - Date.now())));
+}
 function localDate() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
 
-async function confirmSubmission(job, page) {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    console.log(`Confirmación manual requerida antes de enviar: ${job.company} · ${job.role}`);
-    return false;
+async function claimRunnerLock(directory) {
+  const lockPath = path.join(directory, 'runner.lock');
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = await open(lockPath, 'wx');
+      await handle.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+      return async () => {
+        await handle.close().catch(() => {});
+        await unlink(lockPath).catch(() => {});
+      };
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      let pid;
+      try { pid = Number(JSON.parse(await readFile(lockPath, 'utf8')).pid); } catch {}
+      if (pid && pid !== process.pid) {
+        let activeRunner = false;
+        try {
+          process.kill(pid, 0);
+          if (process.platform === 'win32') {
+            const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}"; if ($p) { $p.CommandLine }`], { timeout: 3000 });
+            activeRunner = /(?:^|[\\/])agent[\\/]runner\.mjs\b/i.test(stdout);
+          } else activeRunner = true;
+        } catch (probeError) {
+          if (probeError.code === 'EPERM') activeRunner = true;
+        }
+        if (activeRunner) throw new Error(`Ya hay un agente Postula activo (PID ${pid}). Cerrá esa ventana antes de iniciar otro.`);
+      }
+      await unlink(lockPath).catch(() => {});
+    }
   }
-  const { createInterface } = await import('node:readline/promises');
-  const prompt = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    console.log(`\nFormulario completo: ${job.company} · ${job.role}`);
-    console.log(`Revisalo en el navegador: ${page.url()}`);
-    return (await prompt.question('Escribí ENVIAR para presentar esta candidatura, o Enter para dejarla pendiente: ')).trim() === 'ENVIAR';
-  } finally {
-    prompt.close();
-  }
+  throw new Error('No pude reservar el bloqueo único del agente.');
 }
 
+async function setLiveStatus(update = {}) {
+  liveStatus = { ...liveStatus, ...update, updatedAt: new Date().toISOString() };
+  await writeFile(statusFile, JSON.stringify({
+    ...liveStatus,
+    totals: {
+      submitted: state.applied.length,
+      attemptedToday: state.attemptedToday || 0,
+      submittedToday: state.submittedToday || 0,
+      processed: state.discovered.length,
+    },
+  }, null, 2));
+}
+
+async function startDashboard() {
+  const port = Number(process.env.POSTULA_DASHBOARD_PORT || 4179);
+  const server = createServer(async (request, response) => {
+    const host = String(request.headers.host || '').toLowerCase();
+    const origin = String(request.headers.origin || '').toLowerCase();
+    const allowedOrigin = !origin || origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
+    if (!['127.0.0.1:' + port, 'localhost:' + port].includes(host) || !allowedOrigin) {
+      response.writeHead(403).end('Forbidden');
+      return;
+    }
+    const pathname = new URL(request.url || '/', `http://127.0.0.1:${port}`).pathname;
+    if (request.method === 'GET' && pathname === '/') {
+      response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end('Postula Desktop is running.');
+      return;
+    }
+    if (request.method === 'GET' && pathname === '/api/status') {
+      const snapshot = await readJson(resultFile, { results: [] });
+      const waiting = [...approvalRequests.values()].filter((entry) => entry.expiresAt > Date.now());
+      const seen = new Set();
+      const recent = [];
+      for (const entry of [...(snapshot.results || [])].reverse()) {
+        if (seen.has(entry.jobId)) continue;
+        seen.add(entry.jobId);
+        recent.push(entry);
+        if (recent.length === 8) break;
+      }
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(JSON.stringify({
+        status: liveStatus,
+        totals: { submitted: state.applied.length, attemptedToday: state.attemptedToday || 0, submittedToday: state.submittedToday || 0, processed: state.discovered.length },
+        pendingApprovals: waiting,
+        recent,
+      }));
+      return;
+    }
+    if (request.method === 'POST' && pathname === '/api/approve') {
+      let body = '';
+      for await (const chunk of request) {
+        body += chunk;
+        if (body.length > 2048) break;
+      }
+      let jobId;
+      try { jobId = JSON.parse(body).jobId; } catch {}
+      const pending = approvalRequests.get(jobId);
+      if (!pending || pending.expiresAt <= Date.now()) {
+        response.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'La confirmación venció. Revisá la publicación abierta o volvé a iniciar el agente.' }));
+        return;
+      }
+      approvedApplications.add(jobId);
+      response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (request.method === 'POST' && pathname === '/api/focus') {
+      await activeApplicationPage?.bringToFront().catch(() => {});
+      response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ ok: Boolean(activeApplicationPage) }));
+      return;
+    }
+    if (request.method === 'POST' && pathname === '/api/stop') {
+      keepRunning = false;
+      await setLiveStatus({ phase: 'Deteniendo el agente', currentJob: liveStatus.currentJob });
+      response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ ok: true }));
+      return;
+    }
+    response.writeHead(404).end('Not found');
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
+  console.log(`API local para la app de escritorio disponible en ${`http://127.0.0.1:${port}`}`);
+  await setLiveStatus({ phase: 'App lista · preparando navegador' });
+  return server;
+}
+
+async function closeDashboard(server) {
+  await new Promise((resolve) => server.close(resolve));
+}
+
+async function requestDashboardApproval(job, page) {
+  const expiresAt = Date.now() + 30 * 60 * 1000;
+  const request = {
+    jobId: job.id,
+    company: job.company,
+    role: job.role,
+    source: job.source || 'Fuente pública',
+    url: page.url(),
+    match: job.match,
+    expiresAt,
+  };
+  approvalRequests.set(job.id, request);
+  activeApplicationPage = page;
+  await setLiveStatus({ phase: 'Esperando tu confirmación', currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Formulario listo para enviar' } });
+  try {
+    while (keepRunning && Date.now() < expiresAt && !page.isClosed()) {
+      if (approvedApplications.has(job.id)) return true;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    return false;
+  } finally {
+    approvalRequests.delete(job.id);
+    approvedApplications.delete(job.id);
+    if (activeApplicationPage === page) activeApplicationPage = null;
+  }
+}
 
 async function discoverJobs(p) {
   const boards = String(p.greenhouse || '').split(/[\s,]+/).filter(Boolean);
@@ -230,6 +394,7 @@ async function discoverJobs(p) {
     discoverRemoteOk(),
     discoverHimalayas(),
     discoverWeWorkRemotely(),
+    discoverArbeitnow(),
     ...boards.map(async (board) => {
       const response = await fetch(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(board)}/jobs?content=true`);
       if (!response.ok) throw new Error(`Greenhouse ${board}: HTTP ${response.status}`);
@@ -255,12 +420,12 @@ async function discoverJobs(p) {
 
 async function discoverRemotive() {
   const json = await cachedJson('remotive', 'https://remotive.com/api/remote-jobs', 6 * 60 * 60 * 1000);
-  return (json.jobs || []).map((job) => ({ id: `remotive-${job.id}`, company: job.company_name || 'Empresa', role: job.title, url: job.url, location: job.candidate_required_location || 'Remoto', description: stripHtml(job.description || ''), source: 'Remotive', remote: true }));
+  return (json.jobs || []).map((job) => ({ id: `remotive-${job.id}`, company: job.company_name || 'Empresa', role: job.title, url: job.url, applicationUrl: extractApplicationUrl(job.description || ''), location: job.candidate_required_location || 'Remoto', description: stripHtml(job.description || ''), source: 'Remotive', remote: true }));
 }
 
 async function discoverJobicy() {
   const json = await cachedJson('jobicy', 'https://jobicy.com/api/jobs?count=200&geo=anywhere', 60 * 60 * 1000);
-  return (json.jobs || []).map((job) => ({ id: `jobicy-${job.id}`, company: job.companyName || 'Empresa', role: job.jobTitle, url: job.url, location: job.jobGeo || 'Remoto', description: stripHtml(job.jobDescription || job.jobExcerpt || ''), source: 'Jobicy', remote: true }));
+  return (json.jobs || []).map((job) => ({ id: `jobicy-${job.id}`, company: job.companyName || 'Empresa', role: job.jobTitle, url: job.url, applicationUrl: extractApplicationUrl(job.jobDescription || ''), location: job.jobGeo || 'Remoto', description: stripHtml(job.jobDescription || job.jobExcerpt || ''), source: 'Jobicy', remote: true }));
 }
 
 async function discoverRemoteOk() {
@@ -273,7 +438,11 @@ async function discoverHimalayas() {
   const lists = await Promise.all(terms.map(async (term) => {
     const url = `https://himalayas.app/jobs/api/search?${new URLSearchParams({ q: term, worldwide: 'true', sort: 'recent', page: '1' })}`;
     const json = await cachedJson(`himalayas-${term.replace(/\s+/g, '-')}`, url, 24 * 60 * 60 * 1000);
-    return (json.jobs || []).filter((job) => !job.expiryDate || Number(job.expiryDate) * 1000 > Date.now()).map((job) => ({ id: `himalayas-${job.guid}`, source: 'Himalayas', company: job.companyName || 'Empresa', role: job.title, url: job.applicationLink, listingUrl: `https://himalayas.app/jobs/${encodeURIComponent(job.companySlug || '')}/${encodeURIComponent(job.guid || '')}`, location: (job.locationRestrictions || []).join(', ') || 'Remoto', description: stripHtml(job.description || job.excerpt || ''), remote: true }));
+    return (json.jobs || []).filter((job) => !job.expiryDate || Number(job.expiryDate) * 1000 > Date.now()).map((job) => {
+      const listingUrl = /^https?:\/\//i.test(job.guid || '') ? job.guid : `https://himalayas.app/companies/${encodeURIComponent(job.companySlug || '')}/jobs/${encodeURIComponent(job.guid || '')}`;
+      const applicationUrl = extractApplicationUrl(job.description || '') || (/^https?:\/\//i.test(job.applicationLink || '') && !new URL(job.applicationLink).hostname.endsWith('himalayas.app') ? job.applicationLink : null);
+      return { id: `himalayas-${job.guid}`, source: 'Himalayas', company: job.companyName || 'Empresa', role: job.title, url: listingUrl, listingUrl, applicationUrl, location: (job.locationRestrictions || []).join(', ') || 'Remoto', description: stripHtml(job.description || job.excerpt || ''), remote: true };
+    });
   }));
   return lists.flat();
 }
@@ -287,10 +456,16 @@ async function discoverWeWorkRemotely() {
       const separator = title.indexOf(':');
       const company = separator > 0 ? title.slice(0, separator).trim() : 'Empresa';
       const role = separator > 0 ? title.slice(separator + 1).trim() : title;
-      return { id: `wwr-${xmlValue(item, 'guid') || xmlValue(item, 'link')}`, source: 'We Work Remotely', company, role, url: xmlValue(item, 'link'), location: 'Remoto', description: stripHtml(xmlValue(item, 'description')), remote: true };
+      const descriptionHtml = xmlValue(item, 'description');
+      return { id: `wwr-${xmlValue(item, 'guid') || xmlValue(item, 'link')}`, source: 'We Work Remotely', company, role, url: xmlValue(item, 'link'), applicationUrl: extractApplicationUrl(descriptionHtml), location: 'Remoto', description: stripHtml(descriptionHtml), remote: true };
     }).filter((job) => job.url && job.role);
   }));
   return lists.flat();
+}
+
+async function discoverArbeitnow() {
+  const json = await cachedJson('arbeitnow', 'https://www.arbeitnow.com/api/job-board-api', 60 * 60 * 1000);
+  return (json.data || []).map((job) => ({ id: `arbeitnow-${job.slug}`, company: job.company_name || 'Empresa', role: job.title, url: job.url, applicationUrl: extractApplicationUrl(job.description || ''), location: job.location || '', description: stripHtml(job.description || ''), source: 'Arbeitnow', remote: job.remote === true }));
 }
 
 async function cachedJson(key, url, maxAgeMs) {
@@ -315,6 +490,24 @@ async function cachedText(key, url, maxAgeMs) {
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, JSON.stringify({ fetchedAt: Date.now(), data }));
   return data;
+}
+
+function extractApplicationUrl(html = '') {
+  const ignoredHosts = /(?:^|\.)(?:remotive\.com|jobicy\.com|himalayas\.app|weworkremotely\.com|remoteok\.com|arbeitnow\.com)$/i;
+  const atsHost = /greenhouse|lever\.co|ashbyhq|workable|smartrecruiters|teamtailor|bamboohr|jobvite|workday|icims|recruitee|personio|pinpoint/i;
+  const candidates = [...String(html).matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/gi)].map((match) => {
+    const open = match[0].match(/^<a\b[^>]*>/i)?.[0] || '';
+    const href = open.match(/\bhref\s*=\s*(["'])(.*?)\1/i)?.[2]?.replace(/&amp;/g, '&');
+    const label = stripHtml(match[0].replace(open, '').replace(/<\/a>$/i, ''));
+    try {
+      const url = new URL(href);
+      if (!/^https?:$/.test(url.protocol) || ignoredHosts.test(url.hostname)) return null;
+      const explicit = /\bapply(?:\s+now|\s+for\s+(?:this\s+)?job)?\b|application form|submit (?:your )?application|postular|aplicar(?:se)?\b/i.test(label);
+      const ats = atsHost.test(url.hostname);
+      return explicit || ats ? { href: url.href, score: (explicit ? 3 : 0) + (ats ? 2 : 0) } : null;
+    } catch { return null; }
+  }).filter(Boolean).sort((a, b) => b.score - a.score);
+  return candidates[0]?.href || null;
 }
 
 function xmlValue(xml, name) {
@@ -353,7 +546,8 @@ function inScope(job, p) {
   const hasProjectManagementMatch = seeksProjectManagement && /project manager|program manager/.test(title);
   if (targetRoles.length && !hasTitleMatch && !hasDesignMatch && !hasProjectManagementMatch) return false;
   const mode = String(p.mode || 'Indistinto').toLowerCase();
-  if (mode.includes('remoto') && job.remote !== true && !/remote|remoto|anywhere|worldwide|distributed|latam|latin america|americas|global/i.test(text)) return false;
+  const remoteEvidence = `${job.location || ''} ${job.workplaceType || ''} ${job.type || ''} ${(job.tags || []).join(' ')}`;
+  if (mode.includes('remoto') && job.remote !== true && !/remote|remoto|anywhere|worldwide|distributed|work from home|telecommute/i.test(remoteEvidence)) return false;
   if (mode.includes('remoto') && /north america only|u\.?s\.? only|united states only|canada only|europe only|uk only|must be based in (?:the )?(?:us|united states|north america)/i.test(text) && /argentina|buenos aires|latam|latin america/i.test(p.location || '')) return false;
   if (mode.includes('híbrido') && !/hybrid|h[ií]brid/i.test(text)) return false;
   if (mode.includes('presencial')) {
@@ -392,10 +586,22 @@ async function hasBlocker(page) {
 async function waitForHumanChallenge(page, job) {
   console.log(`\nEl portal solicita una verificación humana: ${job.company} · ${job.role}`);
   console.log('Resolvela vos en la pestaña abierta. El agente esperará hasta 10 minutos y continuará si la página queda habilitada. No intenta resolver ni evadir el CAPTCHA.');
-  await page.waitForFunction(() => !/captcha|verify (?:that )?you(?:'| a)?re human|checking your browser|security verification|robot check|security check|are you a robot/i.test(document.body?.innerText || ''), null, { timeout: 10 * 60 * 1000, polling: 1500 }).catch(() => {});
+  await setLiveStatus({ phase: 'Esperando resolución manual de verificación', currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Resolvé la verificación en la pestaña del portal' } });
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (keepRunning && Date.now() < deadline && !page.isClosed()) {
+    if (!await hasBlocker(page).catch(() => false)) break;
+    await page.waitForTimeout(1500);
+  }
 }
 async function findApplicationUrl(page, job = {}) {
+  if (job.applicationUrl) {
+    try {
+      if (/^https?:$/.test(new URL(job.applicationUrl).protocol)) return job.applicationUrl;
+    } catch {}
+  }
   const currentOrigin = new URL(page.url()).origin;
+  const currentHost = new URL(page.url()).hostname.toLowerCase();
+  if (/(?:^|\.)jobs\.lever\.co$|(?:^|\.)boards\.greenhouse\.io$|(?:^|\.)job-boards\.greenhouse\.io$|(?:^|\.)jobs\.ashbyhq\.com$|(?:^|\.)apply\.workable\.com$|(?:^|\.)jobs\.smartrecruiters\.com$|(?:^|\.)careers\.smartrecruiters\.com$|\.myworkdayjobs\.com$|\.recruitee\.com$|\.teamtailor\.com$|\.bamboohr\.com$/i.test(currentHost)) return null;
   const candidates = await page.locator('a[href]').evaluateAll((links) => links.map((link) => ({
     href: link.href,
     label: `${link.innerText || ''} ${link.getAttribute('aria-label') || ''} ${link.title || ''}`.trim(),
@@ -492,7 +698,7 @@ async function findFormOnPage(page) {
   return await main.count() && await main.locator('input,textarea,select').count() >= 2 ? main : null;
 }
 
-function valueFor(label, p) {
+function valueFor(label, p, job = {}) {
   const text = label.toLowerCase().replace(/[_-]+/g, ' ');
   if (/e-?mail/.test(text)) return p.email;
   if (/phone|mobile|tel[eé]fono|celular/.test(text)) return p.phone;
@@ -507,11 +713,19 @@ function valueFor(label, p) {
   if (/state|province|provincia/.test(text)) return p.location?.split(',').at(-2)?.trim() || '';
   if (/city|location|ubicaci[oó]n|ciudad/.test(text)) return p.location?.split(',')[0].trim();
   if (/cover letter|carta de presentaci[oó]n|professional summary|resumen profesional/.test(text)) return p.summary || '';
+  if (/right to work|work authorization|authori[sz]ed to work|visa sponsorship|sponsorship|work permit|employment eligibility|permiso de trabajo/.test(text)) {
+    const context = normalizeAnswer(`${label} ${job.location || ''}`);
+    const authorization = normalizeAnswer(p.workAuthorization || '');
+    if (/united kingdom|\buk\b|britain|england|london|scotland|wales/.test(context) && /need[^.]{0,30}sponsor|require[^.]{0,30}sponsor/.test(authorization)) return 'I need employer visa sponsorship to work in the United Kingdom.';
+    if (/european union|\beu\b|europe|germany|france|spain|italy|netherlands|ireland|sweden|denmark|portugal/.test(context) && /(eu|europe)[^.]{0,40}(citizen|authorized|authorised|right to work)|citizen[^.]{0,30}(eu|europe)/.test(authorization)) return 'I am an Italian/EU citizen and authorized to work in EU member states.';
+    return '';
+  }
+  if (/salary|compensation|remuneration|salario|sueldo/.test(text) && (/annual|yearly|per year|salary expectation|salary range|expectativa salarial|pretensi[oó]n salarial|usd/.test(text))) return p.salaryExpectation || '';
   if (/website|url|link/.test(text)) return p.link || '';
   return '';
 }
 
-async function fillKnownFields(form, p, cvPath) {
+async function fillKnownFields(form, p, cvPath, job = {}) {
   const missing = [];
   const radioGroups = new Map();
   const checkboxGroups = new Map();
@@ -533,17 +747,23 @@ async function fillKnownFields(form, p, cvPath) {
     }
     if (!await field.isVisible().catch(() => false)) continue;
     if (['checkbox', 'radio'].includes(type)) {
-      const option = await field.evaluate((el) => el.labels ? [...el.labels].map((item) => item.innerText).join(' ').trim() : el.getAttribute('aria-label') || el.value || 'confirmación legal');
-      const groupName = await field.getAttribute('name') || `${type}-${i}`;
+      const metadata = await field.evaluate((el) => ({
+        option: el.labels ? [...el.labels].map((item) => item.innerText).join(' ').trim() : el.getAttribute('aria-label') || el.value || 'confirmación legal',
+        question: el.closest('.application-question,fieldset,[role="group"]')?.innerText?.trim() || el.closest('label')?.innerText?.trim() || el.name || '',
+        group: el.closest('.application-question,fieldset,[role="group"]')?.id || el.closest('.application-question,fieldset,[role="group"]')?.getAttribute('data-qa') || el.name || '',
+      }));
+      const option = metadata.option;
+      const groupName = metadata.group || `${type}-${i}`;
       const groups = type === 'radio' ? radioGroups : checkboxGroups;
-      if (!groups.has(groupName)) groups.set(groupName, { label: option, required });
-      if ((type === 'radio' ? selectedRadios : selectedCheckboxes).has(normalizeAnswer(option))) {
+      if (!groups.has(groupName)) groups.set(groupName, { label: metadata.question || option, required });
+      const automaticRadio = type === 'radio' && autoRadioOption(metadata.question, option, p, job);
+      if ((type === 'radio' ? selectedRadios : selectedCheckboxes).has(normalizeAnswer(option)) || automaticRadio) {
         await field.check({ timeout: 1500 }).catch(() => {});
       }
       continue;
     }
     const label = await field.evaluate((el) => [el.labels ? [...el.labels].map((item) => item.innerText).join(' ') : '', el.closest('.application-question,fieldset,[role="group"]')?.innerText || '', el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || '', el.getAttribute('name') || '', el.id || ''].join(' '));
-    const mapped = valueFor(label, p);
+    const mapped = valueFor(label, p, job);
     if (mapped && type !== 'file' && await field.inputValue().catch(() => '') === '') {
       if (await field.evaluate((el) => el.tagName === 'SELECT')) {
         const optionLabels = await field.locator('option').allTextContents().catch(() => []);
@@ -569,6 +789,24 @@ async function fillKnownFields(form, p, cvPath) {
     if (group.required && !isSelected) missing.push(group.label);
   }
   return { missing: [...new Set(missing)] };
+}
+
+function autoRadioOption(question = '', option = '', profile = {}, job = {}) {
+  const q = normalizeAnswer(`${question} ${job.location || ''}`);
+  const choice = normalizeAnswer(option);
+  const authorization = normalizeAnswer(profile.workAuthorization || '');
+  if (!/^(yes|no|si|sí)$/.test(choice)) return false;
+  const uk = /united kingdom|\buk\b|britain|england|london|scotland|wales/i.test(q);
+  const eu = /european union|\beu\b|europe/i.test(q);
+  const sponsorship = /sponsor|visa|work permit/.test(q);
+  const workRight = /right to work|authorized to work|authorised to work|work authorization|work eligibility|eligible to work/.test(q);
+  const needsUK = /uk[^.]{0,40}(need|require)[^.]{0,20}sponsor|need[^.]{0,25}sponsor[^.]{0,25}uk/i.test(authorization);
+  const authorizedEU = /(eu|europe)[^.]{0,40}(citizen|authorized|authorised|right to work)|citizen[^.]{0,30}(eu|europe)/i.test(authorization);
+  if (uk && needsUK && sponsorship) return /^(yes|si|sí)$/.test(choice);
+  if (uk && needsUK && workRight) return /^(no)$/.test(choice);
+  if (eu && authorizedEU && sponsorship) return /^(no)$/.test(choice);
+  if (eu && authorizedEU && workRight) return /^(yes|si|sí)$/.test(choice);
+  return false;
 }
 
 function normalizeAnswer(value = '') { return String(value).replace(/\s+/g, ' ').trim().toLowerCase(); }

@@ -26,11 +26,11 @@ if not exist "node_modules\playwright" (
 
 call npx playwright install chromium
 if errorlevel 1 goto error
-call npm run agent -- "%CONFIG%"
-set "AGENT_EXIT=%ERRORLEVEL%"
-echo.
-pause
-exit /b %AGENT_EXIT%
+
+where powershell.exe >nul 2>nul
+if errorlevel 1 goto error
+start "Postula · Agente de escritorio" powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File "%~dp0agent\PostulaDesktop.ps1" -Config "%CONFIG%"
+exit /b 0
 
 :error
 echo No se pudo preparar el agente. Revisa la conexion y vuelve a intentarlo.
