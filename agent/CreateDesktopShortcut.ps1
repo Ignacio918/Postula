@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $profilePath = Join-Path $repoRoot '.postula-agent\postula-agent-config.json'
-$iconPath = Join-Path $repoRoot 'assets\postula-icon.ico'
+$iconPath = Join-Path $repoRoot 'assets\postula-shortcut.ico'
 $appId = 'Ignacio.Postula.Desktop'
 
 foreach ($requiredFile in @($profilePath, $iconPath, (Join-Path $PSScriptRoot 'PostulaDesktop.ps1'))) {
@@ -117,11 +117,11 @@ $shortcutPath = Join-Path $desktop 'Postula.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$shortcut.Arguments = "-NoProfile -STA -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'PostulaDesktop.ps1')`" -Config `".postula-agent\postula-agent-config.json`""
+$shortcut.Arguments = "-NoProfile -WindowStyle Hidden -STA -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'PostulaDesktop.ps1')`" -Config `".postula-agent\postula-agent-config.json`""
 $shortcut.WorkingDirectory = $repoRoot
 $shortcut.IconLocation = "$iconPath,0"
 $shortcut.Description = 'Abrir Postula y ver la actividad del agente'
-$shortcut.WindowStyle = 1
+$shortcut.WindowStyle = 7
 $shortcut.Save()
 
 [PostulaShortcutIdentity]::SetAppId($shortcutPath, $appId)

@@ -17,7 +17,7 @@ for (const file of ['index.html', 'styles.css', 'config.js']) {
   await copyFile(file, `dist/${file}`);
 }
 await copyFile('node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs', 'dist/pdf.worker.min.mjs');
-for (const file of ['postula-logo.svg', 'postula-icon.svg', 'postula-icon.png', 'postula-icon.ico']) {
+for (const file of ['postula-logo.svg', 'postula-icon.svg', 'postula-icon.png', 'postula-icon.ico', 'postula-shortcut.ico']) {
   await copyFile(`assets/${file}`, `dist/assets/${file}`);
 }
 console.log('Postula built into dist/ with the Neon SDK bundled locally.');

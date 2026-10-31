@@ -196,7 +196,7 @@ $xamlText = @'
               <StackPanel><StackPanel Margin="18,15,18,11"><TextBlock Text="Listas para enviar" FontSize="15" FontWeight="SemiBold" Foreground="#171715"/><TextBlock Text="Revisá la empresa y el puesto antes de cada envío." FontSize="12" Foreground="#5F5D59" Margin="0,3,0,0" TextWrapping="Wrap"/></StackPanel><Border Height="1" Background="#EEEBE8" Margin="18,0,18,0"/><StackPanel x:Name="ApprovalHost" Margin="18,12,18,18"><TextBlock Text="No hay formularios esperando confirmación." FontSize="13" Foreground="#5F5D59" TextWrapping="Wrap"/></StackPanel></StackPanel>
             </Border>
             <Border Background="#FFFFFF" BorderBrush="#E5E3DF" BorderThickness="1" CornerRadius="8" Padding="18">
-              <StackPanel><TextBlock Text="Cómo opera" FontSize="15" FontWeight="SemiBold" Foreground="#171715"/><TextBlock Text="Tus datos se procesan localmente en esta computadora." FontSize="12" Foreground="#5F5D59" Margin="0,3,0,10"/><TextBlock Text="La búsqueda y la adaptación del CV usan reglas locales, sin tokens de OpenAI. Si falta un dato o aparece un CAPTCHA, el agente pausa esa oferta para que la revises." FontSize="12" Foreground="#5F5D59" TextWrapping="Wrap"/></StackPanel>
+              <StackPanel><TextBlock Text="Cómo opera" FontSize="15" FontWeight="SemiBold" Foreground="#171715"/><TextBlock Text="Tus datos se procesan localmente en esta computadora." FontSize="12" Foreground="#5F5D59" Margin="0,3,0,10"/><TextBlock Text="El navegador trabaja oculto. Abrí un aviso desde Actividad reciente solo si querés revisarlo. Si falta una respuesta o aparece una verificación, Postula la marca para atención manual; no adivina datos ni resuelve CAPTCHAs." FontSize="12" Foreground="#5F5D59" TextWrapping="Wrap"/></StackPanel>
             </Border>
           </StackPanel>
         </Grid>
@@ -322,6 +322,7 @@ function Render-Recent($items) {
     $row.Margin = '0,7,0,7'
     [void]$row.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
     $statusColumn = New-Object System.Windows.Controls.ColumnDefinition; $statusColumn.Width = [System.Windows.GridLength]::Auto; [void]$row.ColumnDefinitions.Add($statusColumn)
+    $openColumn = New-Object System.Windows.Controls.ColumnDefinition; $openColumn.Width = [System.Windows.GridLength]::Auto; [void]$row.ColumnDefinitions.Add($openColumn)
     $title = New-Object System.Windows.Controls.StackPanel
     $role = New-Object System.Windows.Controls.TextBlock; $role.Text = [string]$item.role; $role.FontSize = 13; $role.FontWeight = 'SemiBold'; $role.Foreground = $script:InkBrush; $role.TextTrimming = 'CharacterEllipsis'
     $company = New-Object System.Windows.Controls.TextBlock; $company.Text = "$($item.company) · $($item.source)"; $company.FontSize = 12; $company.Foreground = $script:MutedBrush; $company.Margin = '0,2,0,0'
@@ -329,6 +330,13 @@ function Render-Recent($items) {
     [void]$row.Children.Add($title)
     $badge = New-Object System.Windows.Controls.TextBlock; $badge.Text = Get-StatusLabel ([string]$item.status); $badge.FontSize = 11; $badge.Foreground = $script:MutedBrush; $badge.Margin = '14,3,0,0'; $badge.ToolTip = [string]$item.reason
     [System.Windows.Controls.Grid]::SetColumn($badge, 1); [void]$row.Children.Add($badge)
+    $open = New-Object System.Windows.Controls.Button; $open.Content = 'Abrir aviso'; $open.FontSize = 11; $open.Padding = '8,3'; $open.Margin = '10,0,0,0'; $open.ToolTip = 'Abrir el aviso en el navegador solo cuando quieras revisarlo'
+    $open.Add_Click({
+      $jobUrl = [string]$item.url
+      $parsedUrl = $null
+      if ([Uri]::TryCreate($jobUrl, [UriKind]::Absolute, [ref]$parsedUrl) -and $parsedUrl.Scheme -in @('https', 'http')) { Start-Process $parsedUrl.AbsoluteUri }
+    }.GetNewClosure())
+    [System.Windows.Controls.Grid]::SetColumn($open, 2); [void]$row.Children.Add($open)
     $rule = New-Object System.Windows.Controls.Border; $rule.Height = 1; $rule.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#EEEBE8'); $rule.Margin = '0,0,0,0'
     $cell = New-Object System.Windows.Controls.StackPanel; [void]$cell.Children.Add($row); [void]$cell.Children.Add($rule)
     [void]$script:RecentHost.Children.Add($cell)

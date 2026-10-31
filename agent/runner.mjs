@@ -36,6 +36,7 @@ for (const application of payload.applications || []) {
 }
 const isBatch = Array.isArray(payload.jobs) && payload.jobs.length > 0;
 const intervalMinutes = Math.max(15, Math.min(1440, Number(settings.intervalMinutes || 30)));
+const browserHeadless = settings.browserHeadless !== false;
 const approvalRequests = new Map();
 const approvedApplications = new Set();
 let liveStatus = { phase: 'Iniciando', jobsFound: 0, matched: 0, currentJob: null, updatedAt: new Date().toISOString() };
@@ -54,9 +55,9 @@ const releaseRunnerLock = await claimRunnerLock(workDir);
 const dashboardServer = await startDashboard();
 const dashboardPort = Number(process.env.POSTULA_DASHBOARD_PORT || 4179);
 const context = await chromium.launchPersistentContext(path.join(workDir, 'browser-profile'), {
-  headless: false,
+  headless: browserHeadless,
   viewport: null,
-  args: ['--start-maximized'],
+  args: browserHeadless ? [] : ['--start-maximized'],
 });
 const pdfBrowser = await chromium.launch({ headless: true });
 while (keepRunning) {
@@ -115,7 +116,7 @@ while (keepRunning) {
     if (await hasBlocker(page)) await waitForHumanChallenge(page, job);
     if (await hasBlocker(page)) {
       result.status = 'needs_attention';
-      result.reason = 'El sitio sigue mostrando una verificación. La pestaña queda abierta; resolvela manualmente y volvé a intentar esta oferta desde results.json.';
+      result.reason = 'El sitio requiere una verificación humana. Abrí el aviso desde Actividad reciente si querés revisarlo; Postula no resuelve ni evade CAPTCHAs.';
     } else {
       const listingPage = page;
       const application = await openApplicationForm(page, job);
@@ -128,7 +129,7 @@ while (keepRunning) {
       const filled = await fillKnownFields(form, profile, cvPath, job);
       if (await hasBlocker(page)) {
         result.status = 'needs_attention';
-        result.reason = 'El sitio requiere verificación manual.';
+        result.reason = 'El sitio requiere una verificación manual. Abrí el aviso desde Actividad reciente si querés revisarlo.';
       } else if (filled.missing.length) {
         result.status = 'needs_attention';
         result.reason = `Campos obligatorios que no pude completar con tu perfil: ${filled.missing.join('; ')}`;
@@ -180,7 +181,7 @@ while (keepRunning) {
     if (page && !page.isClosed()) result.url = page.url();
     if (page && await hasBlocker(page).catch(() => false)) {
       result.status = 'needs_attention';
-      result.reason = 'El portal requiere que completes una verificación humana. La pestaña queda abierta.';
+      result.reason = 'El portal requiere una verificación humana. Abrí el aviso desde Actividad reciente si querés revisarlo.';
     } else if (/No encontré un formulario de candidatura reconocible/i.test(message)) {
       result.status = 'no_application_form';
       result.reason = `No se detectó un formulario automático. Página actual: ${result.url || job.url}`;
@@ -196,7 +197,7 @@ while (keepRunning) {
   await writeFile(resultFile, JSON.stringify({ date: today, results }, null, 2));
   await setLiveStatus({ latestResult: { company: result.company, role: result.role, status: result.status, at: result.at }, currentJob: null, totalResults: results.length });
   console.log(`${result.status.padEnd(22)} [${job.source || 'bolsa'}] ${job.company} · ${job.role}${result.reason ? ` — ${result.reason}` : ''}`);
-    if (page && ['needs_attention', 'ready_to_submit', 'submitted_unconfirmed'].includes(result.status)) {
+    if (page && (result.status === 'ready_to_submit' || (!browserHeadless && ['needs_attention', 'submitted_unconfirmed'].includes(result.status)))) {
       pendingPages.push(page);
       while (pendingPages.length > 3) await pendingPages.shift().close().catch(() => {});
     } else if (page) await page.close().catch(() => {});
@@ -213,7 +214,7 @@ while (keepRunning) {
   if (isBatch) keepRunning = false;
   else if (keepRunning) {
     await writeFile(stateFile, JSON.stringify(state, null, 2));
-    console.log(`Próxima búsqueda en ${intervalMinutes} minutos. Dejá esta terminal y el navegador abiertos; Ctrl+C detiene el agente.`);
+    console.log(`Próxima búsqueda en ${intervalMinutes} minutos. Dejá Postula abierto; la automatización del navegador funciona en segundo plano.`);
     await wait(intervalMinutes);
   }
 }
@@ -585,6 +586,11 @@ async function hasBlocker(page) {
 }
 async function waitForHumanChallenge(page, job) {
   console.log(`\nEl portal solicita una verificación humana: ${job.company} · ${job.role}`);
+  if (browserHeadless) {
+    console.log('La verificación requiere intervención humana. El navegador permanece oculto y el aviso queda marcado para revisión desde Postula.');
+    await setLiveStatus({ phase: 'Verificación manual requerida', currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Abrí el aviso desde Actividad reciente para revisar la verificación' } });
+    return;
+  }
   console.log('Resolvela vos en la pestaña abierta. El agente esperará hasta 10 minutos y continuará si la página queda habilitada. No intenta resolver ni evadir el CAPTCHA.');
   await setLiveStatus({ phase: 'Esperando resolución manual de verificación', currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Resolvé la verificación en la pestaña del portal' } });
   const deadline = Date.now() + 10 * 60 * 1000;

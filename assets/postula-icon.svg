@@ -1,6 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
   <title id="title">Postula</title>
-  <rect width="256" height="256" rx="58" fill="#F4F3F1"/>
-  <path d="M72 194V62h68a49 49 0 1 1 0 98h-29" fill="none" stroke="#20211F" stroke-width="23" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="150" cy="168" r="11" fill="#648A69"/>
+  <rect width="256" height="256" rx="58" fill="#20211F"/>
+  <path d="M70 204V52h72a58 58 0 1 1 0 116h-31" fill="none" stroke="#F4F3F1" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

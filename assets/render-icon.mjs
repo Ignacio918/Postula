@@ -20,7 +20,9 @@ try {
   header.writeUInt16LE(32, 12);
   header.writeUInt32LE(png.length, 14);
   header.writeUInt32LE(header.length, 18);
-  await writeFile(path.join(directory, 'postula-icon.ico'), Buffer.concat([header, png]));
+  const ico = Buffer.concat([header, png]);
+  await writeFile(path.join(directory, 'postula-icon.ico'), ico);
+  await writeFile(path.join(directory, 'postula-shortcut.ico'), ico);
 } finally {
   await browser.close();
 }
