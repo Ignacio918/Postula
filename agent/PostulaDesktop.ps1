@@ -223,11 +223,15 @@ $xamlText = @'
         </Grid>
       </Border>
       <ScrollViewer x:Name="MainScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="#111111">
-       <StackPanel Margin="28,25,28,30">
-        <Grid Margin="0,0,0,20"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-          <StackPanel><TextBlock Text="Tu búsqueda de empleo" FontSize="25" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock Text="Ofertas priorizadas, estado de cada solicitud y candidaturas en revisión." FontSize="13" Foreground="#A0A4A8" Margin="0,5,0,0"/></StackPanel>
-          <TextBlock x:Name="UpdatedLabel" Grid.Column="1" Text="Esperando datos" FontSize="11" Foreground="#92979B" VerticalAlignment="Bottom"/>
-        </Grid>
+       <Grid x:Name="WorkspaceViews" Margin="28,25,28,30">
+        <StackPanel x:Name="OverviewView" Width="980" HorizontalAlignment="Center">
+        <StackPanel HorizontalAlignment="Center" Margin="0,2,0,22">
+          <Border Width="54" Height="54" CornerRadius="17" Background="#1D1D1D" HorizontalAlignment="Center" Margin="0,0,0,14"><Image x:Name="WorkspaceLogo" Width="42" Height="42"/></Border>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8"><Ellipse Width="7" Height="7" Fill="#63C5A3" Margin="0,0,8,0"/><TextBlock Text="TU BÚSQUEDA · EN MARCHA" FontSize="10" Foreground="#A0A4A8" VerticalAlignment="Center"/></StackPanel>
+          <TextBlock Text="Ofertas con sentido." FontSize="26" FontWeight="SemiBold" Foreground="#F1F2F3" HorizontalAlignment="Center"/>
+          <TextBlock Text="Encontramos roles relevantes y preparamos cada candidatura con tu experiencia real." FontSize="13" Foreground="#A0A4A8" Margin="0,5,0,0" HorizontalAlignment="Center" TextAlignment="Center"/>
+          <TextBlock x:Name="UpdatedLabel" Text="Esperando datos" FontSize="10" Foreground="#777D82" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+        </StackPanel>
         <Border Background="#181818" BorderBrush="#181818" BorderThickness="0" CornerRadius="8" Margin="0,0,0,14">
           <Grid Height="58"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/></Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock x:Name="Step1Index" Text="1" FontSize="11" Foreground="#63C5A3" Margin="0,0,8,0"/><TextBlock x:Name="Step1" Text="Buscar ofertas" FontSize="12" Foreground="#F1F2F3"/></StackPanel><Border Grid.Column="1" Background="#2B2E31"/>
@@ -265,8 +269,16 @@ $xamlText = @'
             </Border>
           </StackPanel>
         </Grid>
-        <TextBlock Text="Postula · agente local · tu CV y perfil permanecen en esta computadora" FontSize="10" Foreground="#858A8E" Margin="1,16,0,0"/>
-       </StackPanel>
+        <TextBlock Text="Postula · agente local · tu CV y perfil permanecen en esta computadora" FontSize="10" Foreground="#858A8E" Margin="1,16,0,0" HorizontalAlignment="Center"/>
+        </StackPanel>
+        <StackPanel x:Name="ApplicationsView" Visibility="Collapsed" Width="840" HorizontalAlignment="Center">
+          <Grid Margin="0,12,0,24"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Postulaciones" FontSize="26" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock Text="Seguimiento de solicitudes que el portal recibió o confirmó." FontSize="13" Foreground="#A0A4A8" Margin="0,5,0,0"/></StackPanel><Button x:Name="ApplicationsSearchButton" Grid.Column="1" Content="Ir a ofertas" Style="{StaticResource PrimaryButton}" Padding="16,0" VerticalAlignment="Center"/></Grid>
+          <Border Background="#181818" CornerRadius="12" Padding="22">
+            <StackPanel><Grid Margin="0,0,0,14"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Historial de candidaturas" FontSize="15" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock x:Name="ApplicationsCount" Text="Cargando…" FontSize="11" Foreground="#A0A4A8" Margin="0,4,0,0"/></StackPanel><TextBlock Text="PORTAL" Grid.Column="1" FontSize="9" Foreground="#777D82" VerticalAlignment="Center"/></Grid><Border Height="1" Background="#2B2E31"/><StackPanel x:Name="ApplicationsEmpty" Margin="0,18,0,4"><TextBlock Text="Todavía no hay postulaciones enviadas" FontSize="16" FontWeight="SemiBold" Foreground="#F1F2F3" HorizontalAlignment="Center" Margin="0,12,0,0"/><TextBlock Text="Las ofertas que requieren tu confirmación aparecen en la pantalla de actividad. Postula solo cuenta como enviada una solicitud cuando el portal confirma el envío." FontSize="12" Foreground="#A0A4A8" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" MaxWidth="510" Margin="0,8,0,16"/><TextBlock Text="Revisá el estado del agente y buscá más ofertas para empezar." FontSize="11" Foreground="#777D82" HorizontalAlignment="Center" Margin="0,0,0,12"/></StackPanel><StackPanel x:Name="ApplicationsHost" Margin="0,4,0,0"/></StackPanel>
+          </Border>
+          <TextBlock Text="El historial se guarda localmente en esta computadora." FontSize="10" Foreground="#777D82" HorizontalAlignment="Center" Margin="0,16,0,0"/>
+        </StackPanel>
+       </Grid>
       </ScrollViewer>
     </DockPanel>
   </Grid>
@@ -298,6 +310,7 @@ if (Test-Path -LiteralPath $iconPath) {
   $iconFrame = [System.Windows.Media.Imaging.BitmapFrame]::Create($iconUri)
   $window.Icon = $iconFrame
   $window.FindName('BrandIcon').Source = $iconFrame
+  $window.FindName('WorkspaceLogo').Source = $iconFrame
 }
 $script:ConnectionDot = $window.FindName('ConnectionDot')
 $script:ConnectionLabel = $window.FindName('ConnectionLabel')
@@ -315,6 +328,16 @@ $script:MetricSubmitted = $window.FindName('MetricSubmitted')
 $script:RecentHost = $window.FindName('RecentHost')
 $script:MatchesHost = $window.FindName('MatchesHost')
 $script:ApprovalHost = $window.FindName('ApprovalHost')
+$script:OverviewView = $window.FindName('OverviewView')
+$script:ApplicationsView = $window.FindName('ApplicationsView')
+$script:ApplicationsCount = $window.FindName('ApplicationsCount')
+$script:ApplicationsEmpty = $window.FindName('ApplicationsEmpty')
+$script:ApplicationsHost = $window.FindName('ApplicationsHost')
+$script:ApplicationsSearchButton = $window.FindName('ApplicationsSearchButton')
+$script:MainScroll = $window.FindName('MainScroll')
+$script:NavActivityButton = $window.FindName('NavActivity')
+$script:NavOffersButton = $window.FindName('NavOffers')
+$script:NavApplicationsButton = $window.FindName('NavApplications')
 $script:ConfigureButton = $window.FindName('ConfigureButton')
 $script:SearchNowButton = $window.FindName('SearchNowButton')
 $script:AgentToggle = $window.FindName('AgentToggle')
@@ -538,6 +561,30 @@ function Render-Recent($items) {
   }
 }
 
+function Render-Applications($items) {
+  $script:ApplicationsHost.Children.Clear()
+  $submitted = @($items | Where-Object { [string]$_.status -in @('submitted', 'submitted_unconfirmed') } | Sort-Object -Property at -Descending | Select-Object -First 100)
+  $script:ApplicationsCount.Text = if ($submitted.Count -eq 1) { '1 candidatura enviada' } else { "$($submitted.Count) candidaturas enviadas" }
+  $script:ApplicationsEmpty.Visibility = if ($submitted.Count -eq 0) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+  foreach ($item in $submitted) {
+    $row = New-Object System.Windows.Controls.Grid; $row.Margin = '0,10,0,10'
+    [void]$row.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
+    $actionColumn = New-Object System.Windows.Controls.ColumnDefinition; $actionColumn.Width = [System.Windows.GridLength]::Auto; [void]$row.ColumnDefinitions.Add($actionColumn)
+    $details = New-Object System.Windows.Controls.StackPanel
+    $role = New-Object System.Windows.Controls.TextBlock; $role.Text = [string]$item.role; $role.FontSize = 14; $role.FontWeight = 'SemiBold'; $role.Foreground = $script:InkBrush; $role.TextWrapping = 'Wrap'
+    $company = New-Object System.Windows.Controls.TextBlock; $company.Text = "$($item.company) · $($item.source)"; $company.FontSize = 11; $company.Foreground = $script:MutedBrush; $company.Margin = '0,3,0,0'
+    $dateLabel = if ($item.at) { try { ([DateTime]::Parse([string]$item.at)).ToLocalTime().ToString('dd/MM/yyyy HH:mm') } catch { [string]$item.at } } else { 'Fecha no disponible' }
+    $status = if ($item.status -eq 'submitted') { 'Confirmada por el portal' } else { 'Enviada · confirmación no detectada' }
+    $meta = New-Object System.Windows.Controls.TextBlock; $meta.Text = "$status · $dateLabel"; $meta.FontSize = 10; $meta.Foreground = $script:MutedBrush; $meta.Margin = '0,4,0,0'
+    [void]$details.Children.Add($role); [void]$details.Children.Add($company); [void]$details.Children.Add($meta); [void]$row.Children.Add($details)
+    $open = New-Object System.Windows.Controls.Button; $open.Content = 'Abrir aviso ↗'; $open.FontSize = 11; $open.Padding = '9,4'; $open.Margin = '12,0,0,0'; $open.VerticalAlignment = 'Center'
+    $open.Add_Click({ $url = [string]$item.url; $uri = $null; if ([Uri]::TryCreate($url, [UriKind]::Absolute, [ref]$uri) -and $uri.Scheme -in @('https','http')) { Start-Process $uri.AbsoluteUri } }.GetNewClosure())
+    [System.Windows.Controls.Grid]::SetColumn($open, 1); [void]$row.Children.Add($open)
+    [void]$script:ApplicationsHost.Children.Add($row)
+    $rule = New-Object System.Windows.Controls.Border; $rule.Height = 1; $rule.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#2B2E31'); [void]$script:ApplicationsHost.Children.Add($rule)
+  }
+}
+
 function Render-Matches($items, $history) {
   $script:LastMatches = @($items)
   $script:LastOffers = @($history)
@@ -686,6 +733,7 @@ function Update-Window($data) {
   Render-Matches $status.matches $data.offers
   Render-Recent $data.recent
   Render-Approvals $data.pendingApprovals
+  Render-Applications $data.offers
   if ($script:AgentProcess -and $script:AgentProcess.HasExited) { $script:OwnsAgent = $false; $script:AgentProcess = $null }
   $script:AgentToggle.Content = 'Detener agente'
 }
@@ -721,20 +769,34 @@ $window.FindName('NavProfile').Add_Click({ Show-ProfileDialog })
 $window.FindName('SidebarProfileNav').Add_Click({ Show-ProfileDialog })
 $goToSection = {
   param($TargetName)
+  $script:OverviewView.Visibility = [System.Windows.Visibility]::Visible
+  $script:ApplicationsView.Visibility = [System.Windows.Visibility]::Collapsed
+  $script:MainScroll.ScrollToTop()
   $target = $window.FindName($TargetName)
   if ($target) {
     $window.UpdateLayout()
-    $point = $target.TransformToAncestor($window.FindName('MainScroll')).Transform([System.Windows.Point]::new(0, 0))
-    $window.FindName('MainScroll').ScrollToVerticalOffset([Math]::Max(0, $point.Y - 18))
+    $point = $target.TransformToAncestor($script:MainScroll).Transform([System.Windows.Point]::new(0, 0))
+    $script:MainScroll.ScrollToVerticalOffset([Math]::Max(0, $point.Y - 18))
   }
+}.GetNewClosure()
+$showOverview = {
+  $script:ApplicationsView.Visibility = [System.Windows.Visibility]::Collapsed
+  $script:OverviewView.Visibility = [System.Windows.Visibility]::Visible
+  $script:MainScroll.ScrollToTop()
+}.GetNewClosure()
+$showApplications = {
+  $script:OverviewView.Visibility = [System.Windows.Visibility]::Collapsed
+  $script:ApplicationsView.Visibility = [System.Windows.Visibility]::Visible
+  $script:MainScroll.ScrollToTop()
+  $script:ApplicationsView.UpdateLayout()
 }.GetNewClosure()
 $window.FindName('NavActivity').Add_Click({ & $goToSection 'CurrentCard' }.GetNewClosure())
 $window.FindName('SidebarActivityNav').Add_Click({ & $goToSection 'CurrentCard' }.GetNewClosure())
 $showAllOffers = { $script:OffersFilter.SelectedIndex = 0; & $goToSection 'MatchesCard' }.GetNewClosure()
-$showApplications = { $script:OffersFilter.SelectedIndex = 3; & $goToSection 'MatchesCard' }.GetNewClosure()
+$window.FindName('ApplicationsSearchButton').Add_Click({ & $showAllOffers }.GetNewClosure())
 $window.FindName('NavOffers').Add_Click($showAllOffers)
 $window.FindName('SidebarOffersNav').Add_Click($showAllOffers)
-$window.FindName('NavApplications').Add_Click($showApplications)
+$script:NavApplicationsButton.Add_Click($showApplications)
 $window.FindName('SidebarApplicationsNav').Add_Click($showApplications)
 $script:ShowMoreOffers.Add_Click({ $script:DisplayedOfferCount += 20; Render-Matches $script:LastMatches $script:LastOffers })
 $script:OffersFilter.Add_SelectionChanged({ $script:DisplayedOfferCount = 20; if ($script:LastData) { Render-Matches $script:LastMatches $script:LastOffers } })
