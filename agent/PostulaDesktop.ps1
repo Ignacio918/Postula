@@ -1,4 +1,4 @@
-param([string]$Config = ".postula-agent\postula-agent-config.json")
+﻿param([string]$Config = ".postula-agent\postula-agent-config.json")
 
 $ErrorActionPreference = 'Stop'
 $script:RepoRoot = Split-Path -Parent $PSScriptRoot

@@ -108,6 +108,14 @@ while (keepRunning) {
       && !approvalRequests.has(entry.jobId)
       && Date.now() - Date.parse(entry.at || 0) >= 15 * 60 * 1000)
     .map((entry) => entry.jobId));
+  const resumeJobs = [...latestById.values()]
+    .filter((entry) => retryableReady.has(entry.jobId) && /^https?:\/\//i.test(entry.url || ''))
+    .map((entry) => ({
+      id: entry.jobId, company: entry.company, role: entry.role, source: entry.source,
+      url: entry.url, applyUrl: entry.url, applicationUrl: entry.url,
+      location: entry.location || '', score: Number(entry.match || 0),
+    }));
+  const availableJobs = [...new Map([...resumeJobs, ...jobs].filter((job) => job.id && job.url).map((job) => [job.id, job])).values()];
   const pendingOffers = new Set(results
     .filter((entry) => ['needs_attention', 'ready_to_submit'].includes(entry.status) && !retryableReady.has(entry.jobId))
     .map(offerFingerprint));
@@ -126,7 +134,7 @@ while (keepRunning) {
     if (state.retryQueue.length) console.log(`Reintentaré ${state.retryQueue.length} avisos que antes fallaron al detectar el formulario.`);
   }
   for (const jobId of retryableReady) if (!state.retryQueue.includes(jobId)) state.retryQueue.push(jobId);
-  const scopedJobs = jobs.filter((job) => inScope(job, profile));
+  const scopedJobs = availableJobs.filter((job) => inScope(job, profile));
   const candidates = scopedJobs
     .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
     .filter((job) => job.match >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job)) && !pendingOffers.has(offerFingerprint(job)) && (state.retryQueue.includes(job.id) || (!state.pending.includes(job.id) && !state.discovered.includes(job.id))))
