@@ -138,7 +138,7 @@ while (keepRunning) {
   const candidates = scopedJobs
     .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
     .filter((job) => job.match >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job)) && !pendingOffers.has(offerFingerprint(job)) && (state.retryQueue.includes(job.id) || (!state.pending.includes(job.id) && !state.discovered.includes(job.id))))
-    .sort((a, b) => regionPriority(a, profile) - regionPriority(b, profile) || b.match - a.match)
+    .sort((a, b) => regionSortPriority(a, profile) - regionSortPriority(b, profile) || languagePriority(a, profile) - languagePriority(b, profile) || b.match - a.match)
     .slice(0, state.retryQueue.length ? 3 : 30);
   const cycleResults = [];
   const latestResultById = new Map();
@@ -148,23 +148,24 @@ while (keepRunning) {
       const previous = latestResultById.get(job.id);
       return {
         id: job.id, jobId: job.id, role: job.role, company: job.company, source: job.source || 'Fuente pública',
-        location: job.location || 'Ubicación por confirmar', region: regionLabel(job, profile),
+        location: job.location || 'Ubicación por confirmar', region: regionLabel(job, profile), language: languageLabel(job),
         match: Number(job.score ?? scoreJob(job, profile)), status: state.excluded.includes(job.id) ? 'excluded' : previous?.status || 'discovered', reason: state.excluded.includes(job.id) ? 'Excluida desde Postula.' : previous?.reason || '',
         url: job.applicationUrl || job.applyUrl || job.url,
       };
     })
-    .sort((a, b) => regionPriority(a, profile) - regionPriority(b, profile) || b.match - a.match)
+    .sort((a, b) => regionSortPriority(a, profile) - regionSortPriority(b, profile) || languagePriority(a, profile) - languagePriority(b, profile) || b.match - a.match)
     .slice(0, 500);
   const matchCount = scopedJobs.filter((job) => Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.excluded.includes(job.id)).length;
   const bestMatchJob = scopedJobs
     .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
     .sort((a, b) => b.match - a.match)[0];
   const matches = scopedJobs.filter((job) => Number(job.score ?? scoreJob(job, profile)) >= minimumMatch)
-    .sort((a, b) => regionPriority(a, profile) - regionPriority(b, profile) || Number(b.score ?? scoreJob(b, profile)) - Number(a.score ?? scoreJob(a, profile)))
+    .sort((a, b) => regionSortPriority(a, profile) - regionSortPriority(b, profile) || languagePriority(a, profile) - languagePriority(b, profile) || Number(b.score ?? scoreJob(b, profile)) - Number(a.score ?? scoreJob(a, profile)))
     .map((job) => ({
     id: job.id, role: job.role, company: job.company, source: job.source || 'Fuente pública',
     location: job.location || 'Remoto · alcance a confirmar', match: Number(job.score ?? scoreJob(job, profile)),
     region: regionLabel(job, profile),
+    language: languageLabel(job),
     url: job.applicationUrl || job.applyUrl || job.url,
   })).slice(0, 60);
   await setLiveStatus({ phase: candidates.length ? 'Revisando ofertas compatibles' : 'Búsqueda en curso', jobsFound: jobs.length, offersInScope: scopedJobs.length, matched: matchCount, bestMatch: bestMatchJob ? { company: bestMatchJob.company, role: bestMatchJob.role, match: bestMatchJob.match, region: regionLabel(bestMatchJob, profile) } : null, matches, offerCatalog, currentJob: null, error: '' });
@@ -405,14 +406,13 @@ async function startDashboard() {
         if (history.length < 500) history.push(entry);
       }
       const liveCatalog = liveStatus.offerCatalog || [];
-      const historyById = new Map(history.map((entry) => [entry.jobId, entry]));
       const liveIds = new Set(liveCatalog.map((entry) => entry.jobId));
+      const historyById = new Map(history.map((entry) => [entry.jobId, entry]));
       const offers = [
         ...liveCatalog.map((entry) => {
           const previous = historyById.get(entry.jobId);
           return previous ? { ...entry, ...previous, location: entry.location, region: entry.region } : entry;
         }),
-        ...history.filter((entry) => !liveIds.has(entry.jobId)),
       ].slice(0, 500);
       const { offerCatalog: _offerCatalog, ...publicStatus } = liveStatus;
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -420,7 +420,8 @@ async function startDashboard() {
         status: publicStatus,
         totals: { submitted: state.applied.length, attemptedToday: state.attemptedToday || 0, submittedToday: state.submittedToday || 0, processed: state.discovered.length },
         pendingApprovals: waiting,
-        recent,
+        recent: recent.filter((entry) => liveIds.has(entry.jobId)),
+        applications: history,
         offers,
         historyTotal: offers.length,
         minimumMatch,
@@ -464,7 +465,7 @@ async function startDashboard() {
         const body = await readRequestJson(request, 512 * 1024);
         const incoming = body.profile || {};
         const nextProfile = { ...profile };
-        for (const key of ['name', 'email', 'phone', 'location', 'roles', 'mode', 'resume', 'summary', 'experience', 'skills', 'link', 'linkedin', 'portfolio', 'currentCompany', 'salaryExpectation', 'workAuthorization', 'regionPreference']) {
+        for (const key of ['name', 'email', 'phone', 'location', 'roles', 'mode', 'resume', 'summary', 'experience', 'skills', 'link', 'linkedin', 'portfolio', 'currentCompany', 'salaryExpectation', 'workAuthorization', 'regionPreference', 'languagePreference']) {
           if (typeof incoming[key] === 'string') nextProfile[key] = incoming[key].slice(0, key === 'resume' || key === 'experience' ? 250000 : 4000).trim();
         }
         nextProfile.mode ||= 'Remoto';
@@ -607,6 +608,7 @@ async function discoverJobs(p) {
   const boards = String(p.greenhouse || '').split(/[\s,]+/).filter(Boolean);
   const sites = String(p.lever || '').split(/[\s,]+/).filter(Boolean);
   const lists = await Promise.allSettled([
+    discoverBuscoRemoto(p),
     discoverRemotive(),
     discoverJobicy(),
     discoverRemoteOk(),
@@ -637,7 +639,71 @@ async function discoverJobs(p) {
   }
   if (!jobs.length) throw new Error('Ninguna fuente respondió.');
   const keyText = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-  return [...new Map(jobs.filter((job) => job.url).map((job) => [`${keyText(job.company)}|${keyText(job.role)}`, job])).values()];
+  const unique = new Map();
+  for (const job of jobs.filter((entry) => entry.url)) {
+    const key = `${keyText(job.company)}|${keyText(job.role)}`;
+    const previous = unique.get(key);
+    if (!previous) { unique.set(key, job); continue; }
+    const buscoPrimary = String(previous.source || '').startsWith('Busco Remoto IT');
+    const preferBusco = String(job.source || '').startsWith('Busco Remoto IT');
+    const primary = preferBusco && !buscoPrimary ? job : previous;
+    const secondary = primary === previous ? job : previous;
+    unique.set(key, { ...secondary, ...primary, location: primary.location || secondary.location, description: (primary.description || '').length >= (secondary.description || '').length ? primary.description : secondary.description, applicationUrl: primary.applicationUrl || secondary.applicationUrl, applyUrl: primary.applyUrl || secondary.applyUrl });
+  }
+  return [...unique.values()];
+}
+
+async function discoverBuscoRemoto(p) {
+  const cachePath = path.join(workDir, 'cache', 'buscoremoto-rss.json');
+  const cached = await readJson(cachePath, null);
+  if (cached?.fetchedAt && Date.now() - cached.fetchedAt < 6 * 60 * 60 * 1000) return cached.jobs || [];
+  const response = await fetch('https://buscoremotoit.com/rss.xml', { headers: { Accept: 'application/rss+xml, application/xml', 'User-Agent': 'PostulaJobDiscovery/1.0 (public RSS reader)' }, signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw new Error(`Busco Remoto IT RSS: HTTP ${response.status}`);
+  const xml = await response.text();
+  const roleTargets = String(p.roles || '').split(/[,;\n]+/).map((role) => roleTerms(role).filter((word) => !/^(senior|sr|junior|jr|lead|principal|associate|staff|mid|level)$/.test(word))).filter((role) => role.length);
+  const acceptedZone = /\b(?:argentina|latam y america|latinoamerica|latin america|south america|todo el mundo)\b/i;
+  const entries = [...xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)].map(([, item]) => {
+    const title = xmlValue(item, 'title');
+    const description = xmlValue(item, 'description');
+    const pieces = description.split(/\s+[·|]\s+/).map((part) => part.trim());
+    const zone = pieces.length >= 2 ? pieces.at(-2) : '';
+    const separator = title.lastIndexOf(' · ');
+    const role = separator >= 0 ? title.slice(0, separator).trim() : title.trim();
+    const company = separator >= 0 ? title.slice(separator + 3).trim() : 'Empresa';
+    const normalizedRole = roleTerms(role).filter((word) => !/^(senior|sr|junior|jr|lead|principal|associate|staff|mid|level)$/.test(word));
+    const normalizedZone = zone.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const targetFit = roleTargets.some((target) => target.some((word) => normalizedRole.includes(word)));
+    return { item, title, role, company, zone, normalizedZone, guid: xmlValue(item, 'guid'), rssUrl: xmlValue(item, 'link'), source: pieces.at(-1) || 'Busco Remoto IT', targetFit };
+  }).filter((entry) => entry.targetFit && acceptedZone.test(entry.normalizedZone)).slice(0, 30);
+  const jobs = (await Promise.allSettled(entries.map(async (entry) => {
+    if (!/^https:\/\/buscoremotoit\.com\//i.test(entry.rssUrl)) return null;
+    const pageResponse = await fetch(entry.rssUrl, { headers: { Accept: 'text/html', 'User-Agent': 'PostulaJobDiscovery/1.0 (public RSS reader)' }, signal: AbortSignal.timeout(12000) });
+    if (!pageResponse.ok) return null;
+    const page = (await pageResponse.text()).slice(0, 1_000_000);
+    const links = [...page.matchAll(/<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi)].map(([, , href, labelHtml]) => {
+      try {
+        const target = new URL(href.replace(/&amp;/g, '&'), entry.rssUrl);
+        const label = stripHtml(labelHtml);
+        if (!/^https?:$/.test(target.protocol) || target.hostname === 'buscoremotoit.com') return null;
+        return { url: target.href, score: /ver oferta original|original job|view original/i.test(label) ? 5 : /apply|careers|jobs|empleo|postul/i.test(`${label} ${target.hostname}`) ? 2 : 0 };
+      } catch { return null; }
+    }).filter(Boolean).sort((a, b) => b.score - a.score);
+    const sourceUrl = links[0]?.url;
+    if (!sourceUrl || links[0].score === 0) return null;
+    const structured = await fetchStructuredEmployerJob({ url: sourceUrl }).catch(() => null);
+    const location = /todo el mundo/i.test(entry.normalizedZone) ? 'Worldwide' : /latam|latin america|south america/i.test(entry.normalizedZone) ? 'Latin America' : 'Argentina';
+    return {
+      id: `buscoremoto-${entry.guid.replace(/[^a-z0-9-]/gi, '') || encodeURIComponent(entry.rssUrl)}`,
+      company: structured?.company || entry.company, role: structured?.role || entry.role,
+      url: structured?.url || sourceUrl, applyUrl: structured?.applicationUrl || sourceUrl, applicationUrl: structured?.applicationUrl || sourceUrl,
+      listingUrl: structured?.url || sourceUrl, location, description: structured?.description || '', remote: true,
+      source: `Busco Remoto IT · ${entry.source}`,
+    };
+  }))).filter((result) => result.status === 'fulfilled' && result.value).map((result) => result.value);
+  await mkdir(path.dirname(cachePath), { recursive: true });
+  await writeFile(cachePath, JSON.stringify({ fetchedAt: Date.now(), jobs }), 'utf8');
+  console.log(`Busco Remoto IT: ${jobs.length} avisos Argentina/LATAM/globales por RSS público.`);
+  return jobs;
 }
 
 async function discoverPythonScrape(p) {
@@ -994,6 +1060,7 @@ function inScope(job, p) {
   const hasDesignMatch = seeksDesign && /product designer|product design|design engineer|ux\s*ui designer|ux designer|ui designer/.test(title);
   const hasProjectManagementMatch = seeksProjectManagement && /project manager|program manager/.test(title);
   if (targetRoles.length && !hasTitleMatch && !hasDesignMatch && !hasProjectManagementMatch) return false;
+  if (p.languagePreference === 'spanish-only' && languageLabel(job) !== 'Español') return false;
   const mode = String(p.mode || 'Remoto').toLowerCase();
   const workEvidence = `${job.location || ''} ${job.workplaceType || ''} ${job.type || ''} ${job.remoteStatus || ''}`;
   const remoteEvidence = `${workEvidence} ${(job.tags || []).join(' ')} ${job.description || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -1017,19 +1084,21 @@ function inScope(job, p) {
 }
 
 function regionPriority(job, profile) {
-  if (profile.regionPreference === 'balanced') return 0;
   const location = String(job.location || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const description = String(job.description || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const evidence = `${location} ${description}`;
   if (/\b(argentina|argentinian|buenos aires|la plata)\b/.test(location) || /\b(?:based in|located in|candidates in|applicants in|hiring in)\b[^.!?]{0,60}\b(?:argentina|buenos aires|la plata)\b/.test(description)) return 0;
-  if (/\b(latam|latin america|south america|americas|mexico|brazil|chile|colombia|uruguay|peru|ecuador|paraguay|bolivia|costa rica|panama|guatemala|dominican republic)\b/.test(location) || /\b(?:based in|located in|candidates in|applicants in|hiring in)\b[^.!?]{0,80}\b(?:latam|latin america|south america|americas|mexico|brazil|chile|colombia|uruguay|peru|ecuador)\b/.test(description)) return 1;
-  if (/\b(americas|worldwide|anywhere|global|international|all countries|remote)\b/.test(location) || job.remote === true || /\b(remote|remoto|worldwide|anywhere|global)\b/.test(evidence)) return 2;
-  return 2;
+  if (/\b(latam|latin america|south america|mexico|brazil|chile|colombia|uruguay|peru|ecuador|paraguay|bolivia|costa rica|panama|guatemala|dominican republic)\b/.test(location) || /\b(?:based in|located in|candidates in|applicants in|hiring in)\b[^.!?]{0,80}\b(?:latam|latin america|south america|mexico|brazil|chile|colombia|uruguay|peru|ecuador)\b/.test(description)) return 1;
+  if (/\b(?:worldwide|anywhere|global remote|remote global|remote worldwide|all countries|work from anywhere)\b/.test(location)) return 2;
+  if (/^(?:remote|remoto|remote \/ unspecified|unspecified|work from home|remote work|multiple locations|ubicacion por confirmar|remoto \/ unspecified)$/.test(location.trim()) || job.remote === true || /\b(?:work from anywhere|anywhere in the world|open to candidates globally|open to applicants worldwide|no location restrictions|candidates around the world|all countries|remote[- ]first globally)\b/.test(description)) return 3;
+  return 4;
 }
+
+function regionSortPriority(job, profile) { return profile.regionPreference === 'balanced' ? 0 : regionPriority(job, profile); }
 
 function regionLabel(job, profile) {
   const priority = regionPriority(job, profile);
-  return priority === 0 ? 'Argentina' : priority === 1 ? 'LATAM' : 'Remoto global';
+  return priority === 0 ? 'Argentina' : priority === 1 ? 'LATAM' : priority === 2 ? 'Remoto global' : priority === 3 ? 'Remoto · alcance a confirmar' : 'Ubicación restringida';
 }
 
 function locationFitsArgentina(job, profile) {
@@ -1039,13 +1108,40 @@ function locationFitsArgentina(job, profile) {
   // An employer HQ is not necessarily where the remote employee must live.
   location = location.replace(/\([^)]*\b(?:hq|headquarters|office)\b[^)]*\)/gi, ' ');
   const normalizedLocation = location.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const globalOrArgentina = /\b(worldwide|anywhere|global|international|all countries|americas|latin america|latam|south america|argentina|buenos aires|la plata)\b/.test(normalizedLocation);
-  const restrictedRegion = /\b(united kingdom|uk only|britain|england|scotland|wales|london|manchester|edinburgh|cambridge,? uk|europe|european union|eu only|emea|north america|united states|u\.?s\.?|usa|san francisco|new york|austin|seattle|boston|los angeles|chicago|denver|atlanta|washington dc|miami|toronto|vancouver|canada|india|apac|australia|new zealand|singapore|japan|china|germany|france|spain|netherlands|ireland|switzerland|poland|portugal|mexico only|brazil only)\b/.test(normalizedLocation);
-  if (restrictedRegion && !globalOrArgentina) return false;
-
   const description = String(job.description || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const explicitCountryLimit = /\b(?:must be|need to be|needs to be|only open to|only available to|candidates must|applicants must|based|located|reside|resident|authorized to work)[^.!?\n]{0,90}\b(?:united kingdom|uk|britain|england|united states|u\.?s\.?|usa|canada|north america|europe|emea|india|australia)\b|\b(?:united kingdom|uk|united states|u\.?s\.?|usa|canada|europe|emea)\s+only\b/.test(description);
-  return !explicitCountryLimit;
+  const evidence = `${normalizedLocation} ${description} ${String(job.role || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()}`;
+  const latamPattern = /\b(?:argentina|buenos aires|la plata|latam|latin america|south america|mexico|brazil|chile|colombia|uruguay|peru|ecuador|paraguay|bolivia|costa rica|panama|guatemala|dominican republic)\b/;
+  const latam = latamPattern.test(normalizedLocation);
+  const latamEligibility = latamPattern.test(description);
+  const explicitCountryLimit = /\b(?:must be|need to be|needs to be|only open to|only available to|candidates must|applicants must|based|located|reside|resident|authorized to work|eligible to work|hiring in|candidates in|applicants in)[^.!?\n]{0,100}\b(?:united kingdom|uk|britain|england|scotland|wales|united states|u\.?s\.?|usa|canada|north america|europe|european union|eu|emea|india|australia|new zealand|philippines|singapore|japan|germany|france|spain|netherlands|ireland|switzerland|poland|portugal|texas|california|new york)\b|\b(?:united kingdom|uk|united states|u\.?s\.?|usa|canada|europe|emea|india|australia|philippines|texas|california)\s+only\b/.test(evidence);
+  const title = String(job.role || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const titleRegionLimit = /\b(?:uk|u\.s\.|us|usa|united states|united kingdom|india|philippines|texas)\s+(?:remote|based|only)\b/.test(title) || /(?:[-–|]\s*)(?:uk|us|usa|united states|philippines)\s*$/.test(title);
+  if ((explicitCountryLimit || titleRegionLimit) && !latamEligibility) return false;
+  const globalLocation = /\b(?:anywhere|worldwide|global remote|remote global|remote worldwide|remote anywhere|all countries)\b/.test(normalizedLocation);
+  const genericLocation = !normalizedLocation || /^(?:remote|remoto|remote \/ unspecified|unspecified|work from home|remote work|multiple locations|ubicacion por confirmar|remoto \/ unspecified)$/i.test(normalizedLocation.trim());
+  if (!genericLocation && !latam && !globalLocation) return false;
+  return true;
+}
+
+function languageLabel(job) {
+  const description = String(job.description || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const evidence = `${description} ${(job.tags || []).join(' ')}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const explicit = `${String(job.role || '')} ${evidence}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (/\b(?:spanish|espanol|fluent in spanish|native spanish|spanish speaking|spanish required|espanohablante)\b/.test(explicit)) return 'Español';
+  if (/\b(?:english|fluent in english|english required|english speaking|inglés|ingles)\b/.test(explicit)) return 'Inglés';
+  const spanishWords = (evidence.match(/\b(?:para|equipo|con|experiencia|requisitos|buscamos|responsabilidades|beneficios|trabajo|remoto|habilidades|empresa|ofrecemos|tus|nuestro|desarrollo|diseno|disenar|postulantes|acerca|puesto|anos|mas|eres|esta|seras|tendra|contamos|se requiere)\b/g) || []).length;
+  const englishWords = (evidence.match(/\b(?:the|and|with|you|your|our|for|from|experience|requirements|responsibilities|benefits|remote|skills|company|we are|will|years|about|role|what|who|work|team|designed|looking|join)\b/g) || []).length;
+  if (spanishWords >= 3 && spanishWords >= englishWords) return 'Español';
+  if (englishWords >= 4 && englishWords > spanishWords) return 'Inglés';
+  return 'Sin determinar';
+}
+
+function languagePriority(job, profile) {
+  const preference = profile.languagePreference || 'spanish-first';
+  if (preference === 'any') return 0;
+  const language = languageLabel(job);
+  if (preference === 'spanish-only') return 0;
+  return language === 'Español' ? 0 : language === 'Sin determinar' ? 1 : 2;
 }
 
 function tailoredText(job, p) {
@@ -1203,7 +1299,7 @@ function valueFor(label, p, job = {}) {
   if (/e-?mail/.test(text)) return p.email;
   if (/phone|mobile|tel[eé]fono|celular/.test(text)) return p.phone;
   if (/current company|current employer|present employer|most recent employer|empresa actual|empleador actual/.test(text)) return p.currentCompany || 'Not currently employed';
-  if (/full name|your name|^name$|nombre completo/.test(text)) return p.name;
+  if (/full name|your name|candidate name|applicant name|nombre completo/.test(text) || (/\bname\b/.test(text) && !/\b(?:company|employer|role|position|project|school|organization|username|first|last|family) name\b/.test(text))) return p.name;
   if (/first name|given name|nombre\b/.test(text) && !/last|apellido/.test(text)) return p.name?.trim().split(/\s+/)[0];
   if (/last name|family name|surname|apellido/.test(text)) return p.name?.trim().split(/\s+/).slice(1).join(' ');
   if (/country|pa[ií]s/.test(text)) return p.location?.split(',').at(-1).trim();

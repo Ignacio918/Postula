@@ -454,7 +454,10 @@ function Show-ProfileDialog {
   $regionCaption = New-Object System.Windows.Controls.TextBlock; $regionCaption.Text = 'Prioridad geográfica'; $regionCaption.FontSize = 12; $regionCaption.Foreground = $script:MutedBrush; $regionCaption.Margin = '0,12,0,5'; [void]$preferencesPanel.Children.Add($regionCaption)
   $region = New-Object System.Windows.Controls.ComboBox; $region.Height = 40; $region.FontSize = 13; $region.Padding = '10,6'; $region.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#222629'); $region.Foreground = $script:InkBrush; $region.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#454A4D'); [void]$region.Items.Add('Argentina → LATAM → remoto global'); [void]$region.Items.Add('Solo Argentina y LATAM'); [void]$region.Items.Add('Sin prioridad geográfica')
   $region.SelectedIndex = switch ([string]$p.regionPreference) { 'regional-only' { 1 } 'balanced' { 2 } default { 0 } }; [void]$preferencesPanel.Children.Add($region)
-  $regionNote = New-Object System.Windows.Controls.TextBlock; $regionNote.Text = 'Primero se consideran Argentina y LATAM. El puntaje mide coincidencia con tu CV; no predice contratación.'; $regionNote.FontSize = 11; $regionNote.Foreground = $script:MutedBrush; $regionNote.Margin = '0,5,0,0'; $regionNote.TextWrapping = 'Wrap'; [void]$preferencesPanel.Children.Add($regionNote)
+  $regionNote = New-Object System.Windows.Controls.TextBlock; $regionNote.Text = 'Argentina y LATAM primero. Las vacantes que solo dicen Remote quedan marcadas con alcance a confirmar; las ciudades o países restringidos se excluyen.'; $regionNote.FontSize = 11; $regionNote.Foreground = $script:MutedBrush; $regionNote.Margin = '0,5,0,0'; $regionNote.TextWrapping = 'Wrap'; [void]$preferencesPanel.Children.Add($regionNote)
+  $languageCaption = New-Object System.Windows.Controls.TextBlock; $languageCaption.Text = 'Idioma de la oferta'; $languageCaption.FontSize = 12; $languageCaption.Foreground = $script:MutedBrush; $languageCaption.Margin = '0,12,0,5'; [void]$preferencesPanel.Children.Add($languageCaption)
+  $language = New-Object System.Windows.Controls.ComboBox; $language.Height = 40; $language.FontSize = 13; $language.Padding = '10,6'; $language.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#222629'); $language.Foreground = $script:InkBrush; $language.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#454A4D'); [void]$language.Items.Add('Priorizar español'); [void]$language.Items.Add('Español únicamente'); [void]$language.Items.Add('Sin preferencia'); $language.SelectedIndex = switch ([string]$p.languagePreference) { 'spanish-only' { 1 } 'any' { 2 } default { 0 } }; [void]$preferencesPanel.Children.Add($language)
+  $languageNote = New-Object System.Windows.Controls.TextBlock; $languageNote.Text = 'Primero aparecen vacantes publicadas o que solicitan español. El idioma se estima por el texto disponible.'; $languageNote.FontSize = 11; $languageNote.Foreground = $script:MutedBrush; $languageNote.Margin = '0,5,0,0'; $languageNote.TextWrapping = 'Wrap'; [void]$preferencesPanel.Children.Add($languageNote)
   $minMatch = Add-ProfileField $preferencesPanel 'Encaje mínimo (%)' ([string]$(if ($saved.settings.minimumMatch) { $saved.settings.minimumMatch } else { 60 }))
   $interval = Add-ProfileField $preferencesPanel 'Revisar ofertas cada (minutos, desde 1)' ([string]$(if ($saved.settings.intervalMinutes) { $saved.settings.intervalMinutes } else { 30 }))
   $searchNote = New-Object System.Windows.Controls.TextBlock; $searchNote.Text = 'Esto define cada ciclo de búsqueda. No aumenta por sí solo el número de formularios completables; las candidaturas tienen un límite separado.'; $searchNote.FontSize = 11; $searchNote.Foreground = $script:MutedBrush; $searchNote.TextWrapping = 'Wrap'; $searchNote.Margin = '0,5,0,0'; [void]$preferencesPanel.Children.Add($searchNote)
@@ -506,6 +509,7 @@ function Show-ProfileDialog {
         experience = [string]$p.experience; skills = $skills.Text.Trim(); link = $portfolio.Text.Trim(); portfolio = $portfolio.Text.Trim();
         salaryExpectation = $salary.Text.Trim(); workAuthorization = $authorization.Text.Trim();
         regionPreference = @('regional-first', 'regional-only', 'balanced')[[int]$region.SelectedIndex];
+        languagePreference = @('spanish-first', 'spanish-only', 'any')[[int]$language.SelectedIndex];
         applicationAnswers = $p.applicationAnswers
       }
       $answerFields = @{}
@@ -654,7 +658,7 @@ function Render-Matches($items, $history) {
     $role = New-Object System.Windows.Controls.TextBlock; $role.Text = [string]$item.role; $role.FontSize = 13; $role.FontWeight = 'SemiBold'; $role.Foreground = $script:InkBrush; $role.TextWrapping = 'Wrap'
     $company = New-Object System.Windows.Controls.TextBlock; $company.Text = "$($item.company) · $($item.source)"; $company.FontSize = 11; $company.Foreground = $script:MutedBrush; $company.Margin = '0,2,0,0'
     $score = if ($null -ne $item.match -and [string]$item.match) { "$($item.match)% de encaje" } else { 'Sin puntaje' }
-    $metaParts = @(); if ($item.region) { $metaParts += [string]$item.region }; if ($item.location) { $metaParts += [string]$item.location }; $metaParts += $score
+    $metaParts = @(); if ($item.region) { $metaParts += [string]$item.region }; if ($item.location) { $metaParts += [string]$item.location }; if ($item.language) { $metaParts += [string]$item.language }; $metaParts += $score
     $meta = New-Object System.Windows.Controls.TextBlock; $meta.Text = $metaParts -join ' · '; $meta.FontSize = 10; $meta.Foreground = $script:MutedBrush; $meta.Margin = '0,2,0,0'; $meta.TextWrapping = 'Wrap'
     $statusLabel = if ($item.status) { Get-StatusLabel ([string]$item.status) } else { 'Nueva · pendiente de revisión' }
     $statusText = New-Object System.Windows.Controls.TextBlock; $statusText.Text = $statusLabel; $statusText.FontSize = 10; $statusText.Foreground = if ([string]$item.status -in @('submitted','submitted_unconfirmed')) { $script:GreenBrush } else { $script:MutedBrush }; $statusText.Margin = '0,3,0,0'
@@ -757,7 +761,7 @@ function Update-Window($data) {
   Render-Matches $status.matches $data.offers
   Render-Recent $data.recent
   Render-Approvals $data.pendingApprovals
-  Render-Applications $data.offers
+  Render-Applications $data.applications
   $topErrors = @($data.offers | Where-Object { $_.status -in @('needs_attention','error','no_application_form') } | Select-Object -First 1)
   if ($matched -eq 0 -and $status.bestMatch) { $script:DiagnosticsLabel.Text = "El mínimo configurado es $($data.minimumMatch)%. La oferta más cercana es $($status.bestMatch.role) · $($status.bestMatch.company), con $($status.bestMatch.match)% ($($data.minimumMatch - $status.bestMatch.match) puntos por debajo). Podés bajar el mínimo en Preferencias de búsqueda." }
   elseif ($topErrors.Count) { $script:DiagnosticsLabel.Text = "Último bloqueo: $($topErrors[0].company) · $(Get-StatusLabel ([string]$topErrors[0].status)). $([string]$topErrors[0].reason)" }
