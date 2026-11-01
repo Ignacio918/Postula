@@ -99,7 +99,7 @@ $xamlText = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Postula · Agente" Height="900" Width="1440" MinHeight="700" MinWidth="1080"
-        WindowStartupLocation="CenterScreen" Background="#111315" Foreground="#F1F2F3" FontFamily="Segoe UI">
+        WindowStartupLocation="CenterScreen" Background="#111111" Foreground="#F1F2F3" FontFamily="Segoe UI">
   <Window.Resources>
     <Style TargetType="Button">
       <Setter Property="Foreground" Value="#E8EAEC"/><Setter Property="Background" Value="#202326"/>
@@ -118,7 +118,50 @@ $xamlText = @'
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-      <Setter Property="Foreground" Value="#111315"/><Setter Property="Background" Value="#F1F2F3"/><Setter Property="BorderBrush" Value="#F1F2F3"/>
+      <Setter Property="Foreground" Value="#111111"/><Setter Property="Background" Value="#F1F2F3"/><Setter Property="BorderBrush" Value="#F1F2F3"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Height" Value="36"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="primaryBorder" Background="{TemplateBinding Background}" CornerRadius="18" Padding="{TemplateBinding Padding}">
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="primaryBorder" Property="Opacity" Value="0.88"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="primaryBorder" Property="Opacity" Value="0.5"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="ComboBoxItem">
+      <Setter Property="Foreground" Value="#E8EAEC"/><Setter Property="Background" Value="#181818"/><Setter Property="Padding" Value="9,6"/><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="SnapsToDevicePixels" Value="True"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem">
+        <Border x:Name="itemBorder" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}" CornerRadius="4" SnapsToDevicePixels="True">
+          <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="itemBorder" Property="Background" Value="#292929"/></Trigger>
+          <Trigger Property="IsSelected" Value="True"><Setter TargetName="itemBorder" Property="Background" Value="#292929"/><Setter Property="Foreground" Value="#FFFFFF"/></Trigger>
+          <Trigger Property="IsEnabled" Value="False"><Setter TargetName="itemBorder" Property="Opacity" Value="0.5"/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="ComboBox">
+      <Setter Property="Foreground" Value="#E8EAEC"/><Setter Property="Background" Value="#202020"/><Setter Property="BorderBrush" Value="#343434"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="8,4"/><Setter Property="SnapsToDevicePixels" Value="True"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBox">
+        <Grid>
+          <ToggleButton x:Name="Toggle" Focusable="False" ClickMode="Press" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}">
+            <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
+              <Border x:Name="toggleBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" ContentStringFormat="{TemplateBinding ContentStringFormat}" VerticalAlignment="Center" HorizontalAlignment="Left"/><Path Grid.Column="1" Data="M 0 0 L 4 4 L 8 0 Z" Fill="#A0A4A8" Width="8" Height="4" Stretch="Fill" VerticalAlignment="Center" Margin="8,0,2,0"/></Grid>
+              </Border>
+              <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="toggleBorder" Property="Background" Value="#292929"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter TargetName="toggleBorder" Property="Opacity" Value="0.5"/></Trigger></ControlTemplate.Triggers>
+            </ControlTemplate></ToggleButton.Template>
+          </ToggleButton>
+          <Popup x:Name="Popup" Placement="Bottom" AllowsTransparency="True" Focusable="False" IsOpen="{TemplateBinding IsDropDownOpen}" PopupAnimation="Fade">
+            <Border Background="#181818" BorderBrush="#343434" BorderThickness="1" CornerRadius="6" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
+              <ScrollViewer CanContentScroll="True" SnapsToDevicePixels="True"><ItemsPresenter/></ScrollViewer>
+            </Border>
+          </Popup>
+        </Grid>
+        <ControlTemplate.Triggers><Trigger Property="HasItems" Value="False"><Setter TargetName="Popup" Property="MinHeight" Value="24"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55"/></Trigger></ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="NavButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
       <Setter Property="HorizontalContentAlignment" Value="Left"/><Setter Property="Background" Value="Transparent"/>
@@ -127,14 +170,14 @@ $xamlText = @'
     </Style>
   </Window.Resources>
   <Grid>
-    <Grid.ColumnDefinitions><ColumnDefinition Width="58"/><ColumnDefinition Width="250"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-    <Border Grid.Column="0" Background="#0D0F10" BorderBrush="#292C2F" BorderThickness="0,0,1,0">
+    <Grid.ColumnDefinitions><ColumnDefinition Width="58"/><ColumnDefinition Width="270"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+    <Border Grid.Column="0" Background="#0B0B0B" BorderBrush="#292929" BorderThickness="0,0,1,0">
       <DockPanel LastChildFill="False">
         <Border DockPanel.Dock="Top" Width="34" Height="34" CornerRadius="8" Background="#202326" Margin="11,14,11,24" ToolTip="Postula">
           <Image x:Name="BrandIcon" Width="25" Height="25"/>
         </Border>
         <StackPanel DockPanel.Dock="Top">
-          <Button x:Name="NavActivity" Content="◉" ToolTip="Actividad del agente" Style="{StaticResource NavButton}" HorizontalContentAlignment="Center" Padding="0,10" Margin="7,0,7,6" Background="#25292B" Foreground="#63C5A3"/>
+          <Button x:Name="NavActivity" Content="◉" ToolTip="Actividad del agente" Style="{StaticResource NavButton}" HorizontalContentAlignment="Center" Padding="0,10" Margin="7,0,7,6" Background="#252525" Foreground="#F1F2F3"/>
           <Button x:Name="NavOffers" Content="⌕" ToolTip="Ofertas que coinciden" Style="{StaticResource NavButton}" HorizontalContentAlignment="Center" Padding="0,10" Margin="7,0,7,6"/>
           <Button x:Name="NavApplications" Content="✓" ToolTip="Postulaciones y revisiones" Style="{StaticResource NavButton}" HorizontalContentAlignment="Center" Padding="0,10" Margin="7,0,7,6"/>
         </StackPanel>
@@ -144,7 +187,7 @@ $xamlText = @'
         </StackPanel>
       </DockPanel>
     </Border>
-    <Border Grid.Column="1" Background="#151719" BorderBrush="#292C2F" BorderThickness="0,0,1,0">
+    <Border Grid.Column="1" Background="#121212" BorderBrush="#292929" BorderThickness="0,0,1,0">
       <DockPanel Margin="14,18,14,14">
         <StackPanel DockPanel.Dock="Top">
           <StackPanel Orientation="Horizontal" Margin="2,0,0,17">
@@ -154,7 +197,7 @@ $xamlText = @'
           <TextBlock Text="TU ESPACIO" FontSize="10" Foreground="#8D9296" Margin="3,0,0,8"/>
           <Grid Height="36"><TextBox x:Name="SearchBox" Padding="10,7" FontSize="12" Background="#202326" Foreground="#E8EAEC" BorderBrush="#34383B" CaretBrush="#63C5A3" ToolTip="Filtrar ofertas por puesto o empresa" Text=""/><TextBlock x:Name="SearchPlaceholder" Text="⌕  Filtrar ofertas" Foreground="#858A8E" FontSize="12" Margin="11,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/></Grid>
           <TextBlock Text="BÚSQUEDA" FontSize="10" Foreground="#8D9296" Margin="3,22,0,8"/>
-          <Border Background="#222628" BorderBrush="#34383B" BorderThickness="1" CornerRadius="7" Padding="10,11" Margin="0,0,0,8">
+          <Border Background="#1C1C1C" BorderBrush="#343434" BorderThickness="1" CornerRadius="7" Padding="10,11" Margin="0,0,0,8">
             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
               <Border Width="25" Height="25" CornerRadius="6" Background="#303638" VerticalAlignment="Top"><TextBlock Text="P" Foreground="#63C5A3" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
               <StackPanel Grid.Column="1"><TextBlock Text="Empleo" FontSize="13" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock x:Name="SidebarPhase" Text="Leyendo estado…" FontSize="11" Foreground="#A0A4A8" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/></StackPanel>
@@ -173,19 +216,19 @@ $xamlText = @'
       </DockPanel>
     </Border>
     <DockPanel Grid.Column="2" LastChildFill="True">
-      <Border DockPanel.Dock="Top" Height="62" Background="#111315" BorderBrush="#292C2F" BorderThickness="0,0,0,1">
+      <Border DockPanel.Dock="Top" Height="64" Background="#111111" BorderBrush="#292929" BorderThickness="0,0,0,1">
         <Grid Margin="24,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-          <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="AGENTE DE ESCRITORIO" FontSize="10" Foreground="#92979B"/><Border Width="1" Height="18" Background="#34383B" Margin="13,0"/><Ellipse x:Name="ConnectionDot" Width="7" Height="7" Fill="#777D82" Margin="0,0,8,0"/><TextBlock x:Name="ConnectionLabel" Text="Conectando…" FontSize="12" Foreground="#C5C8CA" VerticalAlignment="Center"/></StackPanel>
-          <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="ConfigureButton" Content="Configurar perfil" Margin="0,0,9,0"/><Button x:Name="AgentToggle" Content="Detener agente" MinWidth="112"/></StackPanel>
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="postula" FontSize="14" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock Text=" · LOCAL" FontSize="10" Foreground="#929292" VerticalAlignment="Center" Margin="8,0,0,0"/><Border Width="1" Height="18" Background="#343434" Margin="14,0"/><Ellipse x:Name="ConnectionDot" Width="7" Height="7" Fill="#777D82" Margin="0,0,8,0"/><TextBlock x:Name="ConnectionLabel" Text="Conectando…" FontSize="12" Foreground="#C5C5C5" VerticalAlignment="Center"/></StackPanel>
+          <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button x:Name="SearchNowButton" Content="Buscar ofertas" Style="{StaticResource PrimaryButton}" Padding="15,0" Margin="0,0,9,0"/><Button x:Name="ConfigureButton" Content="Configurar perfil" Margin="0,0,9,0"/><Button x:Name="AgentToggle" Content="Detener agente" MinWidth="112"/></StackPanel>
         </Grid>
       </Border>
-      <ScrollViewer x:Name="MainScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="#111315">
+      <ScrollViewer x:Name="MainScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="#111111">
        <StackPanel Margin="28,25,28,30">
         <Grid Margin="0,0,0,20"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-          <StackPanel><TextBlock Text="Actividad del agente" FontSize="25" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock Text="Ofertas, encaje y candidaturas en un solo lugar." FontSize="13" Foreground="#A0A4A8" Margin="0,5,0,0"/></StackPanel>
+          <StackPanel><TextBlock Text="Tu búsqueda de empleo" FontSize="25" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock Text="Ofertas priorizadas, estado de cada solicitud y candidaturas en revisión." FontSize="13" Foreground="#A0A4A8" Margin="0,5,0,0"/></StackPanel>
           <TextBlock x:Name="UpdatedLabel" Grid.Column="1" Text="Esperando datos" FontSize="11" Foreground="#92979B" VerticalAlignment="Bottom"/>
         </Grid>
-        <Border Background="#191B1D" BorderBrush="#2B2E31" BorderThickness="1" CornerRadius="8" Margin="0,0,0,14">
+        <Border Background="#181818" BorderBrush="#181818" BorderThickness="0" CornerRadius="8" Margin="0,0,0,14">
           <Grid Height="58"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/></Grid.ColumnDefinitions>
             <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock x:Name="Step1Index" Text="1" FontSize="11" Foreground="#63C5A3" Margin="0,0,8,0"/><TextBlock x:Name="Step1" Text="Buscar ofertas" FontSize="12" Foreground="#F1F2F3"/></StackPanel><Border Grid.Column="1" Background="#2B2E31"/>
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock x:Name="Step2Index" Text="2" FontSize="11" Foreground="#858A8E" Margin="0,0,8,0"/><TextBlock x:Name="Step2" Text="Validar encaje" FontSize="12" Foreground="#A0A4A8"/></StackPanel><Border Grid.Column="3" Background="#2B2E31"/>
@@ -193,32 +236,32 @@ $xamlText = @'
             <StackPanel Grid.Column="6" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center"><TextBlock x:Name="Step4Index" Text="4" FontSize="11" Foreground="#858A8E" Margin="0,0,8,0"/><TextBlock x:Name="Step4" Text="Confirmar y enviar" FontSize="12" Foreground="#A0A4A8"/></StackPanel>
           </Grid>
         </Border>
-        <Border Background="#191B1D" BorderBrush="#2B2E31" BorderThickness="1" CornerRadius="8" Margin="0,0,0,21">
+        <Border Background="#181818" BorderBrush="#181818" BorderThickness="0" CornerRadius="8" Margin="0,0,0,21">
           <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/><ColumnDefinition Width="1"/><ColumnDefinition/></Grid.ColumnDefinitions>
-            <StackPanel Grid.Column="0" Margin="16,12"><TextBlock Text="Ofertas vistas" FontSize="12" Foreground="#A0A4A8"/><TextBlock x:Name="MetricProcessed" Text="0" FontSize="25" Foreground="#F1F2F3" Margin="0,2,0,0"/><TextBlock Text="desde el inicio" FontSize="11" Foreground="#858A8E" Margin="0,1,0,0"/></StackPanel><Border Grid.Column="1" Background="#2B2E31"/>
-            <StackPanel Grid.Column="2" Margin="16,12"><TextBlock Text="Compatibles" FontSize="12" Foreground="#A0A4A8"/><TextBlock x:Name="MetricMatched" Text="0" FontSize="25" Foreground="#F1F2F3" Margin="0,2,0,0"/><TextBlock Text="con tu perfil" FontSize="11" Foreground="#858A8E" Margin="0,1,0,0"/></StackPanel><Border Grid.Column="3" Background="#2B2E31"/>
+            <StackPanel Grid.Column="0" Margin="16,12"><TextBlock Text="Avisos revisados" FontSize="12" Foreground="#A0A4A8"/><TextBlock x:Name="MetricProcessed" Text="0" FontSize="25" Foreground="#F1F2F3" Margin="0,2,0,0"/><TextBlock Text="abiertos por el agente" FontSize="11" Foreground="#858A8E" Margin="0,1,0,0"/></StackPanel><Border Grid.Column="1" Background="#2B2E31"/>
+            <StackPanel Grid.Column="2" Margin="16,12"><TextBlock Text="Compatibles" FontSize="12" Foreground="#A0A4A8"/><TextBlock x:Name="MetricMatched" Text="0" FontSize="25" Foreground="#F1F2F3" Margin="0,2,0,0"/><TextBlock Text="en las ofertas actuales" FontSize="11" Foreground="#858A8E" Margin="0,1,0,0"/></StackPanel><Border Grid.Column="3" Background="#2B2E31"/>
             <StackPanel Grid.Column="4" Margin="16,12"><TextBlock Text="Listas para revisar" FontSize="12" Foreground="#A0A4A8"/><TextBlock x:Name="MetricReady" Text="0" FontSize="25" Foreground="#F1F2F3" Margin="0,2,0,0"/><TextBlock Text="requieren confirmación" FontSize="11" Foreground="#858A8E" Margin="0,1,0,0"/></StackPanel><Border Grid.Column="5" Background="#2B2E31"/>
             <StackPanel Grid.Column="6" Margin="16,12"><TextBlock Text="Confirmadas" FontSize="12" Foreground="#A0A4A8"/><TextBlock x:Name="MetricSubmitted" Text="0" FontSize="25" Foreground="#F1F2F3" Margin="0,2,0,0"/><TextBlock Text="por el portal" FontSize="11" Foreground="#858A8E" Margin="0,1,0,0"/></StackPanel>
           </Grid>
         </Border>
         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="1.35*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="1*"/></Grid.ColumnDefinitions>
           <StackPanel Grid.Column="0">
-            <Border x:Name="CurrentCard" Background="#191B1D" BorderBrush="#2B2E31" BorderThickness="1" CornerRadius="8" Margin="0,0,0,16">
+            <Border x:Name="CurrentCard" Background="#181818" BorderBrush="#181818" BorderThickness="0" CornerRadius="8" Margin="0,0,0,16">
               <StackPanel><Grid Margin="16,14,16,11"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Ahora" FontSize="14" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock x:Name="PhaseLabel" Text="Leyendo el estado del agente" FontSize="11" Foreground="#A0A4A8" Margin="0,3,0,0"/></StackPanel><TextBlock x:Name="WorkLabel" Grid.Column="1" Text="En espera" FontSize="11" Foreground="#63C5A3" VerticalAlignment="Center"/></Grid><Border Height="1" Background="#2B2E31" Margin="16,0"/><StackPanel Margin="16,12,16,15"><TextBlock x:Name="CurrentStage" Text="Esperando actividad" FontSize="13" FontWeight="SemiBold" Foreground="#F1F2F3"/><Grid Margin="0,9,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock x:Name="CurrentRole" Text="Todavía no hay una oferta en revisión." FontSize="13" Foreground="#E4E6E8" TextWrapping="Wrap"/><TextBlock x:Name="CurrentCompany" Text="" FontSize="11" Foreground="#A0A4A8" Margin="0,3,0,0"/></StackPanel><TextBlock x:Name="CurrentMatch" Grid.Column="1" Text="" FontSize="11" Foreground="#63C5A3" VerticalAlignment="Top" Margin="14,0,0,0"/></Grid></StackPanel></StackPanel>
             </Border>
-            <Border x:Name="RecentCard" Background="#191B1D" BorderBrush="#2B2E31" BorderThickness="1" CornerRadius="8">
+            <Border x:Name="RecentCard" Background="#181818" BorderBrush="#181818" BorderThickness="0" CornerRadius="8">
               <StackPanel><StackPanel Margin="16,14,16,10"><TextBlock Text="Actividad reciente" FontSize="14" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock Text="Qué pasó con cada oferta" FontSize="11" Foreground="#A0A4A8" Margin="0,3,0,0"/></StackPanel><Border Height="1" Background="#2B2E31" Margin="16,0"/><StackPanel x:Name="RecentHost" Margin="16,4,16,8"><TextBlock Text="Todavía no se procesaron ofertas." FontSize="12" Foreground="#A0A4A8" Margin="0,10"/></StackPanel></StackPanel>
             </Border>
           </StackPanel>
           <StackPanel Grid.Column="2">
-            <Border x:Name="MatchesCard" Background="#191B1D" BorderBrush="#2B2E31" BorderThickness="1" CornerRadius="8" Margin="0,0,0,16">
-              <StackPanel><StackPanel Margin="16,14,16,10"><TextBlock Text="Ofertas encontradas" FontSize="14" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock Text="Ordenadas por coincidencia con el CV" FontSize="11" Foreground="#A0A4A8" Margin="0,3,0,0"/></StackPanel><Border Height="1" Background="#2B2E31" Margin="16,0"/><StackPanel x:Name="MatchesHost" Margin="16,10,16,15"><TextBlock Text="Configurá tu CV y tocá Buscar ahora para ver resultados." FontSize="12" Foreground="#A0A4A8" TextWrapping="Wrap"/></StackPanel></StackPanel>
+            <Border x:Name="MatchesCard" Background="#181818" BorderBrush="#181818" BorderThickness="0" CornerRadius="8" Margin="0,0,0,16">
+              <StackPanel><Grid Margin="16,14,16,10"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Ofertas encontradas" FontSize="14" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock x:Name="MatchesCountLabel" Text="Cargando historial…" FontSize="11" Foreground="#A0A4A8" Margin="0,3,0,0"/></StackPanel><ComboBox x:Name="OffersFilter" Grid.Column="1" Width="142" Height="30" FontSize="11" Padding="6,3" VerticalAlignment="Center" Background="#202326" Foreground="#E8EAEC" BorderBrush="#34383B"><ComboBoxItem Content="Todas"/><ComboBoxItem Content="Compatibles"/><ComboBoxItem Content="Requieren atención"/><ComboBoxItem Content="Enviadas"/></ComboBox></Grid><Border Height="1" Background="#2B2E31" Margin="16,0"/><StackPanel Margin="16,10,16,15"><StackPanel x:Name="MatchesHost"><TextBlock Text="Configurá tu CV y tocá Buscar ahora para ver resultados." FontSize="12" Foreground="#A0A4A8" TextWrapping="Wrap"/></StackPanel><Button x:Name="ShowMoreOffers" Content="Mostrar más ofertas" Visibility="Collapsed" HorizontalAlignment="Stretch" Margin="0,10,0,0"/></StackPanel></StackPanel>
             </Border>
-            <Border x:Name="ApprovalCard" Background="#191B1D" BorderBrush="#63C5A3" BorderThickness="1" CornerRadius="8" Margin="0,0,0,16">
+            <Border x:Name="ApprovalCard" Background="#181818" BorderBrush="#181818" BorderThickness="0" CornerRadius="8" Margin="0,0,0,16">
               <StackPanel><StackPanel Margin="16,14,16,10"><TextBlock Text="Revisión antes de enviar" FontSize="14" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock Text="Confirmá cada candidatura desde acá." FontSize="11" Foreground="#A0A4A8" Margin="0,3,0,0" TextWrapping="Wrap"/></StackPanel><Border Height="1" Background="#2B2E31" Margin="16,0"/><StackPanel x:Name="ApprovalHost" Margin="16,10,16,15"><TextBlock Text="No hay formularios esperando confirmación." FontSize="12" Foreground="#A0A4A8" TextWrapping="Wrap"/></StackPanel></StackPanel>
             </Border>
-            <Border Background="#191B1D" BorderBrush="#2B2E31" BorderThickness="1" CornerRadius="8" Padding="16">
-              <StackPanel><TextBlock Text="Cómo opera" FontSize="14" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock Text="El CV se analiza en esta computadora. Python consulta fuentes públicas y TF-IDF ordena coincidencias sin tokens de IA. Los formularios y CAPTCHA que requieren revisión quedan visibles para vos." FontSize="11" Foreground="#A0A4A8" Margin="0,5,0,0" TextWrapping="Wrap"/></StackPanel>
+            <Border Background="#181818" BorderBrush="#181818" BorderThickness="0" CornerRadius="8" Padding="16">
+              <StackPanel><TextBlock Text="Cómo opera" FontSize="14" FontWeight="SemiBold" Foreground="#F1F2F3"/><TextBlock Text="El CV y el ranking TF-IDF se procesan en esta computadora, sin tokens de IA. El agente completa los formularios compatibles en segundo plano y espera tu confirmación antes de enviarlos. CAPTCHA y preguntas que no puede responder quedan marcados para revisión." FontSize="11" Foreground="#A0A4A8" Margin="0,5,0,0" TextWrapping="Wrap"/></StackPanel>
             </Border>
           </StackPanel>
         </Grid>
@@ -273,8 +316,15 @@ $script:RecentHost = $window.FindName('RecentHost')
 $script:MatchesHost = $window.FindName('MatchesHost')
 $script:ApprovalHost = $window.FindName('ApprovalHost')
 $script:ConfigureButton = $window.FindName('ConfigureButton')
+$script:SearchNowButton = $window.FindName('SearchNowButton')
 $script:AgentToggle = $window.FindName('AgentToggle')
 $script:SearchBox = $window.FindName('SearchBox')
+$script:OffersFilter = $window.FindName('OffersFilter')
+$script:OffersFilter.SelectedIndex = 0
+$script:MatchesCountLabel = $window.FindName('MatchesCountLabel')
+$script:ShowMoreOffers = $window.FindName('ShowMoreOffers')
+$script:DisplayedOfferCount = 20
+$script:LastOffers = @()
 $script:SidebarDot = $window.FindName('SidebarDot')
 $script:SidebarPhase = $window.FindName('SidebarPhase')
 $script:LastMatches = @()
@@ -361,6 +411,8 @@ function Show-ProfileDialog {
   $email = Add-ProfileField $form 'Email' ([string]$p.email)
   $roles = Add-ProfileField $form 'Puestos (separados por coma)' ([string]$p.roles)
   $location = Add-ProfileField $form 'Ubicación' ($(if ($p.location) { [string]$p.location } else { 'Buenos Aires, Argentina' }))
+  $currentCompany = Add-ProfileField $form 'Empresa actual (dejalo vacío si hoy no trabajás)' ''
+  $linkedin = Add-ProfileField $form 'LinkedIn (opcional)' ([string]$p.linkedin)
   $modeCaption = New-Object System.Windows.Controls.TextBlock; $modeCaption.Text = 'Modalidad'; $modeCaption.FontSize = 12; $modeCaption.Foreground = $script:MutedBrush; $modeCaption.Margin = '0,10,0,5'; [void]$form.Children.Add($modeCaption)
   $mode = New-Object System.Windows.Controls.ComboBox; $mode.Height = 38; $mode.FontSize = 13; $mode.Padding = '8,5'; $mode.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#202326'); $mode.Foreground = $script:InkBrush; $mode.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#34383B'); [void]$mode.Items.Add('Remoto'); [void]$mode.Items.Add('Híbrido'); [void]$mode.Items.Add('Presencial'); [void]$mode.Items.Add('Indistinto (todos)')
   $savedMode = ([string]$p.mode).ToLowerInvariant()
@@ -372,8 +424,8 @@ function Show-ProfileDialog {
   $regionNote = New-Object System.Windows.Controls.TextBlock; $regionNote.Text = 'Primero se considera la región y luego el encaje con tu CV. El puntaje mide coincidencia de texto, no probabilidad de contratación.'; $regionNote.FontSize = 11; $regionNote.Foreground = $script:MutedBrush; $regionNote.Margin = '0,4,0,0'; $regionNote.TextWrapping = 'Wrap'; [void]$form.Children.Add($regionNote)
   $minMatch = Add-ProfileField $form 'Encaje mínimo (%)' ([string]$(if ($saved.settings.minimumMatch) { $saved.settings.minimumMatch } else { 60 }))
   $interval = Add-ProfileField $form 'Revisar ofertas cada (minutos, desde 1)' ([string]$(if ($saved.settings.intervalMinutes) { $saved.settings.intervalMinutes } else { 30 }))
-  $searchNote = New-Object System.Windows.Controls.TextBlock; $searchNote.Text = 'La frecuencia controla los ciclos de revisión. Las fuentes externas usan caché y sus propios ritmos para evitar consultas repetidas.'; $searchNote.FontSize = 11; $searchNote.Foreground = $script:MutedBrush; $searchNote.TextWrapping = 'Wrap'; [void]$form.Children.Add($searchNote)
-  $dailyLimit = Add-ProfileField $form 'Máximo diario de postulaciones enviadas (separado de búsquedas)' ([string]$(if ($saved.settings.dailyLimit) { $saved.settings.dailyLimit } elseif ($p.dailyLimit) { $p.dailyLimit } else { 5 }))
+  $searchNote = New-Object System.Windows.Controls.TextBlock; $searchNote.Text = 'La frecuencia define cada ciclo. Las fuentes guardan caché para no repetir consultas: buscar ofertas y enviar candidaturas son límites separados.'; $searchNote.FontSize = 11; $searchNote.Foreground = $script:MutedBrush; $searchNote.TextWrapping = 'Wrap'; [void]$form.Children.Add($searchNote)
+  $dailyLimit = Add-ProfileField $form 'Límite diario de candidaturas (no limita la búsqueda)' ([string]$(if ($saved.settings.dailyLimit) { $saved.settings.dailyLimit } elseif ($p.dailyLimit) { $p.dailyLimit } else { 5 }))
   $cvHeading = New-Object System.Windows.Controls.TextBlock; $cvHeading.Text = 'CV · análisis local'; $cvHeading.FontSize = 16; $cvHeading.FontWeight = 'SemiBold'; $cvHeading.Foreground = $script:InkBrush; $cvHeading.Margin = '0,18,0,4'; [void]$form.Children.Add($cvHeading)
   $cvNote = New-Object System.Windows.Controls.TextBlock; $cvNote.Text = 'PDF o TXT · máximo 8 MB. El texto extraído se guarda en el archivo local de configuración y se usa para el ranking TF-IDF.'; $cvNote.FontSize = 12; $cvNote.Foreground = $script:MutedBrush; $cvNote.TextWrapping = 'Wrap'; [void]$form.Children.Add($cvNote)
   $cvRow = New-Object System.Windows.Controls.StackPanel; $cvRow.Orientation = 'Horizontal'; $cvRow.Margin = '0,10,0,3'; [void]$form.Children.Add($cvRow)
@@ -391,6 +443,7 @@ function Show-ProfileDialog {
       $bytes = [System.IO.File]::ReadAllBytes($picker.FileName)
       $analysis = Invoke-PostulaApi '/api/analyze-cv' @{ fileName = $info.Name; contentBase64 = [Convert]::ToBase64String($bytes) }
       $resume.Text = [string]$analysis.text; $fileLabel.Text = "Analizado: $($info.Name) · $($analysis.skills.Count) habilidades detectadas"
+      if (-not $linkedin.Text.Trim() -and $analysis.linkedin) { $linkedin.Text = [string]$analysis.linkedin }
       if (-not $name.Text.Trim() -and $analysis.name) { $name.Text = [string]$analysis.name }
       if (-not $email.Text.Trim() -and $analysis.email) { $email.Text = [string]$analysis.email }
       if (-not $p.phone -and $analysis.phone) { $p | Add-Member -NotePropertyName phone -NotePropertyValue ([string]$analysis.phone) -Force }
@@ -401,13 +454,13 @@ function Show-ProfileDialog {
     $button = $save; $button.IsEnabled = $false; $button.Content = 'Guardando y buscando…'
     try {
       $dailyLimitValue = 0
-      if (-not [int]::TryParse($dailyLimit.Text, [ref]$dailyLimitValue) -or $dailyLimitValue -lt 1 -or $dailyLimitValue -gt 20) { throw 'El máximo diario debe ser un número entre 1 y 20.' }
+      if (-not [int]::TryParse($dailyLimit.Text, [ref]$dailyLimitValue) -or $dailyLimitValue -lt 1 -or $dailyLimitValue -gt 10000) { throw 'El límite diario debe ser un número entre 1 y 10.000.' }
       $minimumMatchValue = 0
       if (-not [int]::TryParse($minMatch.Text, [ref]$minimumMatchValue) -or $minimumMatchValue -lt 30 -or $minimumMatchValue -gt 95) { throw 'El encaje mínimo debe estar entre 30 y 95.' }
       $intervalValue = 0
       if (-not [int]::TryParse($interval.Text, [ref]$intervalValue) -or $intervalValue -lt 1 -or $intervalValue -gt 1440) { throw 'La frecuencia debe ser un número de 1 a 1440 minutos.' }
       $profileData = @{
-        name = $name.Text.Trim(); email = $email.Text.Trim(); phone = [string]$p.phone; location = $location.Text.Trim();
+        name = $name.Text.Trim(); email = $email.Text.Trim(); phone = [string]$p.phone; location = $location.Text.Trim(); currentCompany = $currentCompany.Text.Trim(); linkedin = $linkedin.Text.Trim();
         roles = $roles.Text.Trim(); mode = [string]$mode.SelectedItem; resume = $resume.Text.Trim(); summary = $summary.Text.Trim();
         experience = [string]$p.experience; skills = $skills.Text.Trim(); link = [string]$p.link;
         salaryExpectation = [string]$p.salaryExpectation; workAuthorization = [string]$p.workAuthorization;
@@ -424,6 +477,7 @@ function Show-ProfileDialog {
 
 function Get-StatusLabel([string]$status) {
   switch ($status) {
+    'discovered' { 'Detectada · todavía sin procesar' }
     'submitted' { 'Enviada y confirmada' }
     'submitted_unconfirmed' { 'Enviada · sin confirmación visible' }
     'ready_to_submit' { 'Lista para revisar' }
@@ -484,15 +538,40 @@ function Render-Recent($items) {
   }
 }
 
-function Render-Matches($items) {
+function Render-Matches($items, $history) {
   $script:LastMatches = @($items)
+  $script:LastOffers = @($history)
   $script:MatchesHost.Children.Clear()
+  $unique = [System.Collections.Generic.List[object]]::new()
+  $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  foreach ($entry in @($script:LastOffers) + @($script:LastMatches)) {
+    $key = if ($entry.id) { [string]$entry.id } elseif ($entry.jobId) { [string]$entry.jobId } else { "$($entry.company)|$($entry.role)" }
+    if ($key -and $seen.Add($key)) { $unique.Add($entry) }
+  }
   $query = [string]$script:SearchBox.Text
-  $filtered = @($script:LastMatches | Where-Object { -not $query -or ([string]$_.role + ' ' + [string]$_.company + ' ' + [string]$_.location) -like "*$query*" })
-  $visible = @($filtered | Select-Object -First 8)
+  $filter = if ($script:OffersFilter.SelectedItem) { [string]$script:OffersFilter.SelectedItem.Content } else { 'Todas' }
+  $minimum = if ($script:LastData.minimumMatch) { [int]$script:LastData.minimumMatch } else { 60 }
+  $filtered = @($unique | Where-Object {
+    $status = [string]$_.status
+    $searchText = "$($_.role) $($_.company) $($_.location) $($_.region) $($_.source)"
+    $matchesSearch = -not $query -or $searchText -like "*$query*"
+    $matchesFilter = switch ($filter) {
+      'Compatibles' { ([int]$_.match -ge $minimum) -and $status -ne 'excluded' }
+      'Requieren atención' { $status -in @('needs_attention', 'error', 'no_application_form') }
+      'Enviadas' { $status -in @('submitted', 'submitted_unconfirmed') }
+      default { $true }
+    }
+    $matchesSearch -and $matchesFilter
+  })
+  $visible = @($filtered | Select-Object -First $script:DisplayedOfferCount)
+  $totalFound = if ($script:LastData.jobsFound) { [int]$script:LastData.jobsFound } else { 0 }
+  $inScope = if ($script:LastData.offersInScope) { [int]$script:LastData.offersInScope } else { $filtered.Count }
+  $script:MatchesCountLabel.Text = "$($visible.Count) de $($filtered.Count) mostrados · $inScope en alcance · $totalFound leídos"
+  $script:ShowMoreOffers.Visibility = if ($filtered.Count -gt $visible.Count) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+  $script:ShowMoreOffers.Content = "Mostrar más · quedan $([Math]::Max(0, $filtered.Count - $visible.Count))"
   if ($visible.Count -eq 0) {
     $empty = New-Object System.Windows.Controls.TextBlock
-    $empty.Text = if ($query -and $script:LastMatches.Count) { 'No hay ofertas que coincidan con ese filtro.' } else { 'Sin resultados todavía. Configurá el CV y elegí “Guardar y buscar ahora”.' }; $empty.FontSize = 12; $empty.Foreground = $script:MutedBrush; $empty.TextWrapping = 'Wrap'
+    $empty.Text = if ($query -or $filter -ne 'Todas') { 'No hay avisos que coincidan con este filtro.' } elseif ($script:LastOffers.Count) { 'No hay resultados guardados todavía.' } else { 'No hay ofertas recientes para mostrar. Revisá tu CV y preferencias de búsqueda.' }; $empty.FontSize = 12; $empty.Foreground = $script:MutedBrush; $empty.TextWrapping = 'Wrap'
     [void]$script:MatchesHost.Children.Add($empty); return
   }
   foreach ($entry in $visible) {
@@ -500,17 +579,34 @@ function Render-Matches($items) {
     $grid = New-Object System.Windows.Controls.Grid; $grid.Margin = '0,6,0,6'
     [void]$grid.ColumnDefinitions.Add((New-Object System.Windows.Controls.ColumnDefinition))
     $actionColumn = New-Object System.Windows.Controls.ColumnDefinition; $actionColumn.Width = [System.Windows.GridLength]::Auto; [void]$grid.ColumnDefinitions.Add($actionColumn)
+    $discardColumn = New-Object System.Windows.Controls.ColumnDefinition; $discardColumn.Width = [System.Windows.GridLength]::Auto; [void]$grid.ColumnDefinitions.Add($discardColumn)
     $details = New-Object System.Windows.Controls.StackPanel
     $role = New-Object System.Windows.Controls.TextBlock; $role.Text = [string]$item.role; $role.FontSize = 13; $role.FontWeight = 'SemiBold'; $role.Foreground = $script:InkBrush; $role.TextWrapping = 'Wrap'
     $company = New-Object System.Windows.Controls.TextBlock; $company.Text = "$($item.company) · $($item.source)"; $company.FontSize = 11; $company.Foreground = $script:MutedBrush; $company.Margin = '0,2,0,0'
-    $meta = New-Object System.Windows.Controls.TextBlock; $meta.Text = "$($item.region) · $($item.location) · $($item.match)% encaje"; $meta.FontSize = 11; $meta.Foreground = $script:MutedBrush; $meta.Margin = '0,2,0,0'; $meta.TextWrapping = 'Wrap'
-    [void]$details.Children.Add($role); [void]$details.Children.Add($company); [void]$details.Children.Add($meta); [void]$grid.Children.Add($details)
+    $score = if ($null -ne $item.match -and [string]$item.match) { "$($item.match)% de encaje" } else { 'Sin puntaje' }
+    $metaParts = @(); if ($item.region) { $metaParts += [string]$item.region }; if ($item.location) { $metaParts += [string]$item.location }; $metaParts += $score
+    $meta = New-Object System.Windows.Controls.TextBlock; $meta.Text = $metaParts -join ' · '; $meta.FontSize = 10; $meta.Foreground = $script:MutedBrush; $meta.Margin = '0,2,0,0'; $meta.TextWrapping = 'Wrap'
+    $statusLabel = if ($item.status) { Get-StatusLabel ([string]$item.status) } else { 'Nueva · pendiente de revisión' }
+    $statusText = New-Object System.Windows.Controls.TextBlock; $statusText.Text = $statusLabel; $statusText.FontSize = 10; $statusText.Foreground = if ([string]$item.status -in @('submitted','submitted_unconfirmed')) { $script:GreenBrush } else { $script:MutedBrush }; $statusText.Margin = '0,3,0,0'
+    [void]$details.Children.Add($role); [void]$details.Children.Add($company); [void]$details.Children.Add($meta); [void]$details.Children.Add($statusText)
+    if ($item.reason -and [string]$item.status -in @('needs_attention','error','no_application_form')) { $reason = New-Object System.Windows.Controls.TextBlock; $reason.Text = [string]$item.reason; $reason.FontSize = 10; $reason.Foreground = $script:MutedBrush; $reason.TextWrapping = 'Wrap'; $reason.MaxHeight = 44; $reason.Margin = '0,3,0,0'; [void]$details.Children.Add($reason) }
+    [void]$grid.Children.Add($details)
     $open = New-Object System.Windows.Controls.Button; $open.Content = 'Abrir oferta ↗'; $open.FontSize = 11; $open.Padding = '9,4'; $open.Margin = '10,0,0,0'; $open.VerticalAlignment = 'Center'
     $open.Add_Click({
       $targetUrl = [string]$item.url; $parsed = $null
       if ([Uri]::TryCreate($targetUrl, [UriKind]::Absolute, [ref]$parsed) -and $parsed.Scheme -in @('https', 'http')) { Start-Process $parsed.AbsoluteUri }
     }.GetNewClosure())
     [System.Windows.Controls.Grid]::SetColumn($open, 1); [void]$grid.Children.Add($open)
+    if ([string]$item.status -notin @('excluded', 'submitted', 'submitted_unconfirmed')) {
+      $discard = New-Object System.Windows.Controls.Button; $discard.Content = 'Descartar'; $discard.FontSize = 10; $discard.Padding = '8,4'; $discard.Margin = '6,0,0,0'; $discard.VerticalAlignment = 'Center'; $discard.ToolTip = 'Quitar esta oferta de la búsqueda y de la cola de revisión'
+      $discard.Add_Click({
+        try {
+          Invoke-PostulaApi '/api/exclude' @{ jobId = [string]$item.jobId } | Out-Null
+          $discard.Content = 'Descartada'; $discard.IsEnabled = $false
+        } catch { [System.Windows.MessageBox]::Show($_.Exception.Message, 'Postula') | Out-Null }
+      }.GetNewClosure())
+      [System.Windows.Controls.Grid]::SetColumn($discard, 2); [void]$grid.Children.Add($discard)
+    }
     $divider = New-Object System.Windows.Controls.Border; $divider.Height = 1; $divider.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#2B2E31')
     $cell = New-Object System.Windows.Controls.StackPanel; [void]$cell.Children.Add($grid); [void]$cell.Children.Add($divider); [void]$script:MatchesHost.Children.Add($cell)
   }
@@ -528,9 +624,8 @@ function Render-Approvals($items) {
     $card = New-Object System.Windows.Controls.StackPanel
     $role = New-Object System.Windows.Controls.TextBlock; $role.Text = [string]$pendingItem.role; $role.FontSize = 14; $role.FontWeight = 'SemiBold'; $role.Foreground = $script:InkBrush; $role.TextWrapping = 'Wrap'
     $company = New-Object System.Windows.Controls.TextBlock; $company.Text = "$($pendingItem.company) · $($pendingItem.source)"; $company.FontSize = 12; $company.Foreground = $script:MutedBrush; $company.Margin = '0,3,0,0'
-    $match = New-Object System.Windows.Controls.TextBlock; $match.Text = "Encaje estimado: $($pendingItem.match)% · el formulario queda abierto en Chromium."; $match.FontSize = 12; $match.Foreground = $script:MutedBrush; $match.Margin = '0,10,0,12'; $match.TextWrapping = 'Wrap'
+    $match = New-Object System.Windows.Controls.TextBlock; $match.Text = "Encaje estimado: $($pendingItem.match)% · el formulario está completo en segundo plano y todavía no se envió."; $match.FontSize = 12; $match.Foreground = $script:MutedBrush; $match.Margin = '0,10,0,12'; $match.TextWrapping = 'Wrap'
     $actions = New-Object System.Windows.Controls.StackPanel; $actions.Orientation = 'Horizontal'
-    $review = New-Object System.Windows.Controls.Button; $review.Content = 'Ver formulario abierto'; $review.Margin = '0,0,8,0'; $review.Add_Click({ try { Invoke-PostulaApi '/api/focus' | Out-Null } catch { [System.Windows.MessageBox]::Show('El formulario ya no está abierto.', 'Postula') | Out-Null } }.GetNewClosure())
     $send = New-Object System.Windows.Controls.Button; $send.Content = 'Confirmar y enviar'; $send.Style = $window.FindResource('PrimaryButton')
     $send.Add_Click({
       $confirmationText = "Esto enviará tu CV y los datos de tu perfil a $($pendingItem.company) para el puesto $($pendingItem.role).`n`n¿Confirmás el envío?"
@@ -540,8 +635,8 @@ function Render-Approvals($items) {
       try { Invoke-PostulaApi '/api/approve' @{ jobId = [string]$pendingItem.jobId } | Out-Null; $send.Content = 'Envío autorizado' }
       catch { $send.IsEnabled = $true; $send.Content = 'Confirmar y enviar'; [System.Windows.MessageBox]::Show($_.Exception.Message, 'Postula') | Out-Null }
     }.GetNewClosure())
-    [void]$actions.Children.Add($review); [void]$actions.Children.Add($send)
-    $note = New-Object System.Windows.Controls.TextBlock; $note.Text = "Al confirmar, Postula enviará esta candidatura a $($pendingItem.company)."; $note.FontSize = 12; $note.Foreground = $script:MutedBrush; $note.TextWrapping = 'Wrap'; $note.Margin = '0,9,0,0'
+    [void]$actions.Children.Add($send)
+    $note = New-Object System.Windows.Controls.TextBlock; $note.Text = "Al confirmar, Postula enviará el formulario a $($pendingItem.company). Si el portal pide CAPTCHA o una respuesta que no está en tu perfil, la candidatura queda fuera de esta lista."; $note.FontSize = 12; $note.Foreground = $script:MutedBrush; $note.TextWrapping = 'Wrap'; $note.Margin = '0,9,0,0'
     [void]$card.Children.Add($role); [void]$card.Children.Add($company); [void]$card.Children.Add($match); [void]$card.Children.Add($actions); [void]$card.Children.Add($note)
     [void]$script:ApprovalHost.Children.Add($card)
   }
@@ -562,13 +657,16 @@ function Update-Window($data) {
   if ($null -ne $data.totals.submitted) { $submitted = $data.totals.submitted }
   $phase = [string]$status.phase
   if ([string]::IsNullOrWhiteSpace($phase)) { $phase = 'En espera' }
+  $searchRequested = $phase -match '^Buscando ofertas|Búsqueda solicitada|Perfil guardado · buscando ahora'
+  $script:SearchNowButton.IsEnabled = -not $searchRequested
+  $script:SearchNowButton.Content = if ($searchRequested) { 'Buscando…' } else { 'Buscar ofertas' }
   $script:MetricProcessed.Text = [string]$processed
   $script:MetricMatched.Text = [string]$matched
   $script:MetricReady.Text = [string](@($data.pendingApprovals).Count)
   $script:MetricSubmitted.Text = [string]$submitted
   $script:PhaseLabel.Text = $phase
   $script:SidebarPhase.Text = $phase
-  $isWorking = $status.phase -match 'buscando|revisando|completando|enviando|esperando tu confirmaci[oó]n|verificaci[oó]n'
+  $isWorking = $status.phase -match 'buscando|búsqueda solicitada|revisando|completando|enviando|esperando tu confirmaci[oó]n|verificaci[oó]n'
   $script:WorkLabel.Text = if ($isWorking) { 'Trabajando' } else { 'En espera' }
   $script:WorkLabel.Foreground = if ($isWorking) { $script:BlueBrush } else { $script:GreenBrush }
   $job = $status.currentJob
@@ -585,7 +683,7 @@ function Update-Window($data) {
   }
   $script:SidebarDot.Fill = if ($isWorking) { $script:BlueBrush } else { $script:GreenBrush }
   Set-Pipeline ([string]$job.stage) ([string]$status.phase)
-  Render-Matches $status.matches
+  Render-Matches $status.matches $data.offers
   Render-Recent $data.recent
   Render-Approvals $data.pendingApprovals
   if ($script:AgentProcess -and $script:AgentProcess.HasExited) { $script:OwnsAgent = $false; $script:AgentProcess = $null }
@@ -607,6 +705,17 @@ $toggleClick = {
   }
 }.GetNewClosure()
 $script:AgentToggle.Add_Click($toggleClick)
+$script:SearchNowButton.Add_Click({
+  $script:SearchNowButton.IsEnabled = $false
+  $script:SearchNowButton.Content = 'Buscando…'
+  try {
+    Invoke-PostulaApi '/api/search-now' @{} | Out-Null
+  } catch {
+    $script:SearchNowButton.IsEnabled = $true
+    $script:SearchNowButton.Content = 'Buscar ofertas'
+    [System.Windows.MessageBox]::Show($_.Exception.Message, 'Postula') | Out-Null
+  }
+}.GetNewClosure())
 $script:ConfigureButton.Add_Click({ Show-ProfileDialog })
 $window.FindName('NavProfile').Add_Click({ Show-ProfileDialog })
 $window.FindName('SidebarProfileNav').Add_Click({ Show-ProfileDialog })
@@ -621,13 +730,18 @@ $goToSection = {
 }.GetNewClosure()
 $window.FindName('NavActivity').Add_Click({ & $goToSection 'CurrentCard' }.GetNewClosure())
 $window.FindName('SidebarActivityNav').Add_Click({ & $goToSection 'CurrentCard' }.GetNewClosure())
-$window.FindName('NavOffers').Add_Click({ & $goToSection 'MatchesCard' }.GetNewClosure())
-$window.FindName('SidebarOffersNav').Add_Click({ & $goToSection 'MatchesCard' }.GetNewClosure())
-$window.FindName('NavApplications').Add_Click({ & $goToSection 'ApprovalCard' }.GetNewClosure())
-$window.FindName('SidebarApplicationsNav').Add_Click({ & $goToSection 'ApprovalCard' }.GetNewClosure())
+$showAllOffers = { $script:OffersFilter.SelectedIndex = 0; & $goToSection 'MatchesCard' }.GetNewClosure()
+$showApplications = { $script:OffersFilter.SelectedIndex = 3; & $goToSection 'MatchesCard' }.GetNewClosure()
+$window.FindName('NavOffers').Add_Click($showAllOffers)
+$window.FindName('SidebarOffersNav').Add_Click($showAllOffers)
+$window.FindName('NavApplications').Add_Click($showApplications)
+$window.FindName('SidebarApplicationsNav').Add_Click($showApplications)
+$script:ShowMoreOffers.Add_Click({ $script:DisplayedOfferCount += 20; Render-Matches $script:LastMatches $script:LastOffers })
+$script:OffersFilter.Add_SelectionChanged({ $script:DisplayedOfferCount = 20; if ($script:LastData) { Render-Matches $script:LastMatches $script:LastOffers } })
 $script:SearchBox.Add_TextChanged({
+  $script:DisplayedOfferCount = 20
   $script:SearchPlaceholder.Visibility = if ($script:SearchBox.Text) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
-  if ($script:LastData) { Render-Matches $script:LastMatches }
+  if ($script:LastData) { Render-Matches $script:LastMatches $script:LastOffers }
 })
 
 $timer = New-Object System.Windows.Threading.DispatcherTimer
@@ -641,6 +755,8 @@ $timer.Add_Tick({
     $script:ConnectionDot.Fill = $script:GrayBrush
     $script:SidebarDot.Fill = $script:GrayBrush
     $script:ConnectionLabel.Text = 'Agente desconectado'
+    $script:SearchNowButton.IsEnabled = $false
+    $script:SearchNowButton.Content = 'Buscar ofertas'
     $script:UpdatedLabel.Text = 'La ventana sigue abierta'
     $script:PhaseLabel.Text = 'Agente detenido'
     $script:SidebarPhase.Text = 'Agente detenido'

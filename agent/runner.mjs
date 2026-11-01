@@ -27,7 +27,7 @@ const settings = payload.settings && typeof payload.settings === 'object' && !Ar
       browserHeadless: payload.browserHeadless,
     };
 let minimumMatch = Number(settings.minimumMatch || settings.minimumMatchPercent || profile.autoThreshold || payload.autoThreshold || 80);
-let dailyLimit = Math.max(1, Math.min(20, Number(settings.dailyLimit || payload.dailyLimit || profile.dailyLimit || 5)));
+let dailyLimit = Math.max(1, Math.min(10000, Number(settings.dailyLimit || payload.dailyLimit || profile.dailyLimit || 5)));
 const stateFile = path.join(workDir, 'state.json');
 const resultFile = path.join(workDir, 'results.json');
 const statusFile = path.join(workDir, 'status.json');
@@ -107,20 +107,39 @@ while (keepRunning) {
     if (!state.discovered.includes(prior.jobId)) state.discovered.push(prior.jobId);
     if (['needs_attention', 'ready_to_submit', 'submitted_unconfirmed'].includes(prior.status) && !state.pending.includes(prior.jobId)) state.pending.push(prior.jobId);
   }
-  if ((state.runnerVersion || 0) < 2) {
-    state.retryQueue = [...new Set(results.filter((entry) => entry.source === 'Remote OK' && ['needs_attention', 'error'].includes(entry.status)).slice(-12).reverse().map((entry) => entry.jobId))].slice(0, 3);
-    state.runnerVersion = 2;
-    console.log(`Revisión única tras actualizar el navegador del agente: ${state.retryQueue.length} enlaces de Remote OK.`);
+  if ((state.runnerVersion || 0) < 3) {
+    const latestById = new Map();
+    for (const entry of results) if (entry.jobId) latestById.set(entry.jobId, entry);
+    state.retryQueue = [...latestById.values()]
+      .filter((entry) => ['error', 'no_application_form'].includes(entry.status)
+        || (entry.status === 'needs_attention' && /no mostró un formulario/i.test(entry.reason || '')))
+      .slice(-30).reverse().map((entry) => entry.jobId);
+    state.runnerVersion = 3;
+    if (state.retryQueue.length) console.log(`Reintentaré ${state.retryQueue.length} avisos que antes fallaron al detectar el formulario.`);
   }
-  const candidates = jobs
-    .filter((job) => inScope(job, profile))
+  const scopedJobs = jobs.filter((job) => inScope(job, profile));
+  const candidates = scopedJobs
     .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
     .filter((job) => job.match >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !state.attempted.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job)) && !pendingOffers.has(offerFingerprint(job)) && (state.retryQueue.includes(job.id) || (!state.pending.includes(job.id) && !state.discovered.includes(job.id))))
     .sort((a, b) => regionPriority(a, profile) - regionPriority(b, profile) || b.match - a.match)
     .slice(0, state.retryQueue.length ? 3 : 30);
   const cycleResults = [];
-  const matchCount = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.excluded.includes(job.id) && !state.applied.includes(job.id) && !excludedOffers.has(offerFingerprint(job)) && !appliedOffers.has(offerFingerprint(job)) && !pendingOffers.has(offerFingerprint(job))).length;
-  const matches = jobs.filter((job) => inScope(job, profile) && Number(job.score ?? scoreJob(job, profile)) >= minimumMatch)
+  const latestResultById = new Map();
+  for (const entry of results) if (entry.jobId) latestResultById.set(entry.jobId, entry);
+  const offerCatalog = scopedJobs
+    .map((job) => {
+      const previous = latestResultById.get(job.id);
+      return {
+        id: job.id, jobId: job.id, role: job.role, company: job.company, source: job.source || 'Fuente pública',
+        location: job.location || 'Ubicación por confirmar', region: regionLabel(job, profile),
+        match: Number(job.score ?? scoreJob(job, profile)), status: state.excluded.includes(job.id) ? 'excluded' : previous?.status || 'discovered', reason: state.excluded.includes(job.id) ? 'Excluida desde Postula.' : previous?.reason || '',
+        url: job.applicationUrl || job.applyUrl || job.url,
+      };
+    })
+    .sort((a, b) => regionPriority(a, profile) - regionPriority(b, profile) || b.match - a.match)
+    .slice(0, 500);
+  const matchCount = scopedJobs.filter((job) => Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.excluded.includes(job.id)).length;
+  const matches = scopedJobs.filter((job) => Number(job.score ?? scoreJob(job, profile)) >= minimumMatch)
     .sort((a, b) => regionPriority(a, profile) - regionPriority(b, profile) || Number(b.score ?? scoreJob(b, profile)) - Number(a.score ?? scoreJob(a, profile)))
     .map((job) => ({
     id: job.id, role: job.role, company: job.company, source: job.source || 'Fuente pública',
@@ -128,14 +147,14 @@ while (keepRunning) {
     region: regionLabel(job, profile),
     url: job.applicationUrl || job.applyUrl || job.url,
   })).slice(0, 60);
-  await setLiveStatus({ phase: candidates.length ? 'Revisando ofertas compatibles' : 'Búsqueda en curso', jobsFound: jobs.length, matched: matchCount, matches, currentJob: null, error: '' });
+  await setLiveStatus({ phase: candidates.length ? 'Revisando ofertas compatibles' : 'Búsqueda en curso', jobsFound: jobs.length, offersInScope: scopedJobs.length, matched: matchCount, matches, offerCatalog, currentJob: null, error: '' });
   if (!candidates.length) console.log(`Ciclo completo · ${matchCount} ofertas coinciden con tu perfil; ninguna nueva para revisar.`);
   else console.log(`Agente Postula · ${candidates.length} ofertas nuevas · ${matchCount} compatibles · encaje mínimo ${minimumMatch}% · máximo ${dailyLimit} envíos/día`);
 
   const pendingPages = [];
   for (const job of candidates) {
   await setLiveStatus({ currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Abriendo publicación' } });
-  const result = { jobId: job.id, source: job.source, company: job.company, role: job.role, url: job.url, match: job.match, at: new Date().toISOString() };
+  const result = { jobId: job.id, source: job.source, company: job.company, role: job.role, url: job.url, location: job.location || '', match: job.match, region: regionLabel(job, profile), at: new Date().toISOString() };
   state.discovered.push(job.id);
   let page;
   try {
@@ -184,7 +203,10 @@ while (keepRunning) {
           } else {
           await setLiveStatus({ currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Formulario listo · esperando tu confirmación' } });
           const approved = await requestDashboardApproval(job, page);
-          if (!approved) {
+          if (state.excluded.includes(job.id)) {
+            result.status = 'excluded';
+            result.reason = 'Excluida desde Postula.';
+          } else if (!approved) {
             result.status = 'ready_to_submit';
             result.reason = 'Formulario completo; quedó pendiente la confirmación desde el panel local.';
           } else {
@@ -308,8 +330,9 @@ async function claimRunnerLock(directory) {
 
 async function setLiveStatus(update = {}) {
   liveStatus = { ...liveStatus, ...update, updatedAt: new Date().toISOString() };
+  const { offerCatalog, ...persistedStatus } = liveStatus;
   await writeFile(statusFile, JSON.stringify({
-    ...liveStatus,
+    ...persistedStatus,
     totals: {
       submitted: state.applied.length,
       attemptedToday: state.attemptedToday || 0,
@@ -348,21 +371,39 @@ async function startDashboard() {
     }
     if (request.method === 'GET' && pathname === '/api/status') {
       const snapshot = await readJson(resultFile, { results: [] });
-      const waiting = [...approvalRequests.values()].filter((entry) => entry.expiresAt > Date.now());
+      const waiting = [...approvalRequests.values()].filter((entry) => entry.expiresAt > Date.now() && !state.excluded.includes(entry.jobId));
       const seen = new Set();
       const recent = [];
+      const history = [];
       for (const entry of [...(snapshot.results || [])].reverse()) {
-        if (seen.has(entry.jobId)) continue;
+        if (!entry.jobId || seen.has(entry.jobId)) continue;
         seen.add(entry.jobId);
-        recent.push(entry);
-        if (recent.length === 8) break;
+        if (recent.length < 8) recent.push(entry);
+        if (history.length < 500) history.push(entry);
       }
+      const liveCatalog = liveStatus.offerCatalog || [];
+      const historyById = new Map(history.map((entry) => [entry.jobId, entry]));
+      const liveIds = new Set(liveCatalog.map((entry) => entry.jobId));
+      const offers = [
+        ...liveCatalog.map((entry) => {
+          const previous = historyById.get(entry.jobId);
+          return previous ? { ...entry, ...previous, location: entry.location, region: entry.region } : entry;
+        }),
+        ...history.filter((entry) => !liveIds.has(entry.jobId)),
+      ].slice(0, 500);
+      const { offerCatalog: _offerCatalog, ...publicStatus } = liveStatus;
       response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end(JSON.stringify({
-        status: liveStatus,
+        status: publicStatus,
         totals: { submitted: state.applied.length, attemptedToday: state.attemptedToday || 0, submittedToday: state.submittedToday || 0, processed: state.discovered.length },
         pendingApprovals: waiting,
         recent,
+        offers,
+        historyTotal: offers.length,
+        minimumMatch,
+        dailyLimit,
+        jobsFound: liveStatus.jobsFound || 0,
+        offersInScope: liveStatus.offersInScope || 0,
       }));
       return;
     }
@@ -389,7 +430,7 @@ async function startDashboard() {
         const skillCatalog = ['figma', 'ux research', 'user research', 'product design', 'design systems', 'prototyping', 'accessibility', 'usability testing', 'interaction design', 'stakeholder management', 'project management', 'agile', 'scrum', 'jira', 'service design', 'html', 'css'];
         const skills = skillCatalog.filter((skill) => text.toLowerCase().includes(skill));
         response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-        response.end(JSON.stringify({ text, name: text.split(/\r?\n/).map((line) => line.trim()).find((line) => line && line.length < 80 && !/resume|curriculum vitae|\bcv\b/i.test(line)) || '', email: text.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i)?.[0] || '', phone: text.match(/(?:\+?\d[\d ()-]{7,}\d)/)?.[0]?.trim() || '', skills, analyzedAt: new Date().toISOString() }));
+        response.end(JSON.stringify({ text, name: text.split(/\r?\n/).map((line) => line.trim()).find((line) => line && line.length < 80 && !/resume|curriculum vitae|\bcv\b/i.test(line)) || '', email: text.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i)?.[0] || '', phone: text.match(/(?:\+?\d[\d ()-]{7,}\d)/)?.[0]?.trim() || '', linkedin: text.match(/https?:\/\/(?:www\.)?linkedin\.com\/(?:in|company)\/[\w%/-]+/i)?.[0] || '', skills, analyzedAt: new Date().toISOString() }));
       } catch (error) {
         response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: error.message || 'No pude analizar el CV.' }));
       }
@@ -400,13 +441,13 @@ async function startDashboard() {
         const body = await readRequestJson(request, 512 * 1024);
         const incoming = body.profile || {};
         const nextProfile = { ...profile };
-        for (const key of ['name', 'email', 'phone', 'location', 'roles', 'mode', 'resume', 'summary', 'experience', 'skills', 'link', 'salaryExpectation', 'workAuthorization', 'regionPreference']) {
+        for (const key of ['name', 'email', 'phone', 'location', 'roles', 'mode', 'resume', 'summary', 'experience', 'skills', 'link', 'linkedin', 'portfolio', 'currentCompany', 'salaryExpectation', 'workAuthorization', 'regionPreference']) {
           if (typeof incoming[key] === 'string') nextProfile[key] = incoming[key].slice(0, key === 'resume' || key === 'experience' ? 250000 : 4000).trim();
         }
         nextProfile.mode ||= 'Remoto';
         if (!nextProfile.name || !nextProfile.email || !nextProfile.roles || !nextProfile.resume) throw new Error('Completá nombre, email, puestos objetivo y CV.');
         const nextMinimumMatch = Math.max(30, Math.min(95, Number(body.minimumMatch) || minimumMatch));
-        const nextDailyLimit = Math.max(1, Math.min(20, Number(body.dailyLimit) || dailyLimit));
+        const nextDailyLimit = Math.max(1, Math.min(10000, Number(body.dailyLimit) || dailyLimit));
         const nextIntervalMinutes = Math.max(1, Math.min(1440, Number(body.intervalMinutes) || intervalMinutes));
         settings.minimumMatch = nextMinimumMatch;
         settings.dailyLimit = nextDailyLimit;
@@ -424,6 +465,46 @@ async function startDashboard() {
       }
       return;
     }
+    if (request.method === 'POST' && pathname === '/api/search-now') {
+      if (!keepRunning) {
+        response.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: 'El agente está detenido. Inicialo para buscar ofertas.' }));
+        return;
+      }
+      forceSearchRequested = true;
+      wakeScheduledSearch?.();
+      await setLiveStatus({ phase: 'Búsqueda solicitada · preparando el próximo ciclo', error: '' });
+      response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }).end(JSON.stringify({ ok: true, nextSearch: 'immediate' }));
+      return;
+    }
+    if (request.method === 'POST' && pathname === '/api/exclude') {
+      try {
+        const body = await readRequestJson(request, 2048);
+        const jobId = String(body.jobId || '').trim().slice(0, 500);
+        if (!jobId) throw new Error('Falta identificar la oferta que querés excluir.');
+        if (state.applied.includes(jobId)) throw new Error('Esta postulación ya figura como enviada y confirmada.');
+        if (!state.excluded.includes(jobId)) state.excluded.push(jobId);
+        state.retryQueue = state.retryQueue.filter((id) => id !== jobId);
+        const snapshot = await readJson(resultFile, { date: localDate(), results: [] });
+        snapshot.results ||= [];
+        const previous = [...snapshot.results].reverse().find((entry) => entry.jobId === jobId);
+        const liveOffer = (liveStatus.offerCatalog || []).find((entry) => entry.jobId === jobId);
+        const source = previous || liveOffer;
+        if (source) {
+          const updated = { ...source, status: 'excluded', reason: 'Excluida desde Postula.', at: new Date().toISOString() };
+          snapshot.results = [...snapshot.results, updated];
+          await writeFile(resultFile, JSON.stringify(snapshot, null, 2));
+        }
+        await writeFile(stateFile, JSON.stringify(state, null, 2));
+        if (liveOffer) {
+          liveOffer.status = 'excluded';
+          liveOffer.reason = 'Excluida desde Postula.';
+        }
+        response.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }).end(JSON.stringify({ ok: true, jobId }));
+      } catch (error) {
+        response.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify({ error: error.message || 'No pude excluir esta oferta.' }));
+      }
+      return;
+    }
     if (request.method === 'POST' && pathname === '/api/approve') {
       let body = '';
       for await (const chunk of request) {
@@ -432,6 +513,10 @@ async function startDashboard() {
       }
       let jobId;
       try { jobId = JSON.parse(body).jobId; } catch {}
+      if (state.excluded.includes(jobId)) {
+        response.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'Esta oferta ya fue descartada.' }));
+        return;
+      }
       const pending = approvalRequests.get(jobId);
       if (!pending || pending.expiresAt <= Date.now()) {
         response.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'La confirmación venció. Revisá la publicación abierta o volvé a iniciar el agente.' }));
@@ -483,7 +568,7 @@ async function requestDashboardApproval(job, page) {
   activeApplicationPage = page;
   await setLiveStatus({ phase: 'Esperando tu confirmación', currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Formulario listo para enviar' } });
   try {
-    while (keepRunning && Date.now() < expiresAt && !page.isClosed()) {
+    while (keepRunning && !state.excluded.includes(job.id) && Date.now() < expiresAt && !page.isClosed()) {
       if (approvedApplications.has(job.id)) return true;
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
@@ -910,7 +995,7 @@ function locationFitsArgentina(job, profile) {
   location = location.replace(/\([^)]*\b(?:hq|headquarters|office)\b[^)]*\)/gi, ' ');
   const normalizedLocation = location.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const globalOrArgentina = /\b(worldwide|anywhere|global|international|all countries|americas|latin america|latam|south america|argentina|buenos aires|la plata)\b/.test(normalizedLocation);
-  const restrictedRegion = /\b(united kingdom|uk only|britain|england|scotland|wales|london|manchester|edinburgh|cambridge,? uk|europe|european union|eu only|emea|north america|united states|u\.?s\.?|usa|canada|india|apac|australia|new zealand|singapore|japan|china|germany|france|spain|netherlands|ireland|switzerland|poland|portugal|mexico only|brazil only)\b/.test(normalizedLocation);
+  const restrictedRegion = /\b(united kingdom|uk only|britain|england|scotland|wales|london|manchester|edinburgh|cambridge,? uk|europe|european union|eu only|emea|north america|united states|u\.?s\.?|usa|san francisco|new york|austin|seattle|boston|los angeles|chicago|denver|atlanta|washington dc|miami|toronto|vancouver|canada|india|apac|australia|new zealand|singapore|japan|china|germany|france|spain|netherlands|ireland|switzerland|poland|portugal|mexico only|brazil only)\b/.test(normalizedLocation);
   if (restrictedRegion && !globalOrArgentina) return false;
 
   const description = String(job.description || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -995,26 +1080,7 @@ async function hasConfirmation(page) {
   return /application (was )?submitted|thank you for applying|thanks for applying|application received|candidatura enviada|gracias por postular|recibimos tu postulación/i.test(await page.locator('body').innerText({ timeout: 5000 }).catch(() => ''));
 }
 async function openApplicationForm(page, job = {}) {
-  const findForm = async () => {
-    const forms = page.locator('form');
-    const snapshots = await forms.evaluateAll((nodes) => nodes.map((form, index) => {
-      const fields = [...form.querySelectorAll('input,textarea,select')];
-      const labels = fields.map((el) => [el.name, el.id, el.placeholder, el.getAttribute('aria-label'), [...(el.labels || [])].map((label) => label.innerText).join(' ')].join(' ').toLowerCase());
-      return { index, text: form.innerText.toLowerCase(), labels, hasFile: fields.some((el) => el.type === 'file' && /resume|cv|curriculum|attachment|pdf/i.test(`${el.name} ${el.accept} ${el.getAttribute('aria-label') || ''}`)), fieldCount: fields.length };
-    }));
-    const ranked = snapshots.map((form) => ({ ...form, score: (form.labels.some((text) => /e-?mail/.test(text)) ? 1 : 0) + (form.labels.some((text) => /first name|full name|applicant name|given name|nombre/.test(text)) ? 2 : 0) + (form.hasFile ? 3 : 0) + (/application|apply|candidatura|postulaci[oó]n/.test(form.text) ? 2 : 0) })).filter((form) => form.fieldCount >= 2 && form.score >= 2).sort((a, b) => b.score - a.score);
-    if (ranked.length) return forms.nth(ranked[0].index);
-
-    const containers = page.locator('main,[role="main"],#application,#application-form,#app_body,[data-testid*="application"]');
-    const containerSnapshots = await containers.evaluateAll((nodes) => nodes.map((node, index) => {
-      const fields = [...node.querySelectorAll('input,textarea,select')];
-      const labels = fields.map((el) => [el.name, el.id, el.placeholder, el.getAttribute('aria-label'), [...(el.labels || [])].map((label) => label.innerText).join(' ')].join(' ').toLowerCase());
-      return { index, text: node.innerText.toLowerCase(), labels, fieldCount: fields.length, hasFile: fields.some((el) => el.type === 'file' && /resume|cv|curriculum|attachment|pdf/i.test(`${el.name} ${el.accept} ${el.getAttribute('aria-label') || ''}`)) };
-    }));
-    const app = containerSnapshots.map((node) => ({ ...node, score: (node.labels.some((text) => /e-?mail/.test(text)) ? 1 : 0) + (node.labels.some((text) => /first name|full name|applicant name|given name|nombre/.test(text)) ? 2 : 0) + (node.hasFile ? 3 : 0) + (/application|apply|candidatura|postulaci[oó]n/.test(node.text) || /\/apply(?:\/|\?|$)/i.test(page.url()) ? 2 : 0) })).filter((node) => node.fieldCount >= 2 && node.score >= 3).sort((a, b) => b.score - a.score);
-    if (app.length) return containers.nth(app[0].index);
-    return null;
-  };
+  const findForm = () => findFormOnPage(page);
   let form = await findForm();
   if (form) return { page, form };
   const applyLinks = await page.locator('a[href]').evaluateAll((nodes) => nodes.map((node) => ({ href: node.href, text: `${node.innerText || ''} ${node.getAttribute('aria-label') || ''} ${node.title || ''}`.trim() })));
@@ -1048,31 +1114,49 @@ async function openApplicationForm(page, job = {}) {
 }
 
 async function findFormOnPage(page) {
-  const forms = page.locator('form');
-  const count = await forms.count();
-  if (count) {
-    const ranked = await forms.evaluateAll((nodes) => nodes.map((form, index) => {
+  for (const frame of page.frames()) {
+    const forms = frame.locator('form');
+    const snapshots = await forms.evaluateAll((nodes) => nodes.map((form, index) => {
       const fields = [...form.querySelectorAll('input,textarea,select')];
       const labels = fields.map((el) => `${el.name} ${el.id} ${el.placeholder} ${el.getAttribute('aria-label') || ''} ${[...(el.labels || [])].map((label) => label.innerText).join(' ')}`.toLowerCase());
-      return { index, score: (labels.some((text) => /e-?mail/.test(text)) ? 1 : 0) + (labels.some((text) => /first name|full name|nombre/.test(text)) ? 2 : 0) + (fields.some((el) => el.type === 'file') ? 2 : 0) + (/application|apply|candidatura/.test(form.innerText.toLowerCase()) ? 2 : 0), count: fields.length };
-    }));
-    const best = ranked.filter((form) => form.score >= 2 && form.count >= 2).sort((a, b) => b.score - a.score)[0];
+      return { index, score: (labels.some((text) => /e-?mail/.test(text)) ? 1 : 0) + (labels.some((text) => /first name|full name|nombre/.test(text)) ? 2 : 0) + (fields.some((el) => el.type === 'file' && /resume|cv|curriculum|attachment|pdf/i.test(`${el.name} ${el.id} ${el.accept}`)) ? 2 : 0) + (/application|apply|candidatura/.test(form.innerText.toLowerCase()) ? 2 : 0), count: fields.length };
+    })).catch(() => []);
+    const best = snapshots.filter((form) => form.score >= 2 && form.count >= 2).sort((a, b) => b.score - a.score)[0];
     if (best) return forms.nth(best.index);
+
+    const containers = frame.locator('main,[role="main"],#application,#application-form,#app_body,[data-testid*="application"]');
+    const containerCount = await containers.count().catch(() => 0);
+    for (let index = 0; index < containerCount; index += 1) {
+      const container = containers.nth(index);
+      const fields = await container.locator('input:not([type="hidden"]),textarea,select').count().catch(() => 0);
+      const text = await container.innerText({ timeout: 1000 }).catch(() => '');
+      if (fields >= 2 && /apply|application|candidate|candidatura/i.test(text)) return container;
+    }
+
+    let host = '';
+    let pathname = '';
+    try { host = new URL(frame.url()).hostname; pathname = new URL(frame.url()).pathname; } catch {}
+    if (/jobs\.ashbyhq\.com$/i.test(host) && /\/application\/?$/i.test(pathname)) {
+      const body = frame.locator('body');
+      const fieldCount = await body.locator('input:not([type="hidden"]),textarea,select').count().catch(() => 0);
+      const hasSubmit = await frame.getByRole('button', { name: /submit application/i }).count().catch(() => 0);
+      if (fieldCount >= 3 && hasSubmit === 1) return body;
+    }
   }
-  const main = page.locator('main,[role="main"],#application,#application-form,#app_body').first();
-  return await main.count() && await main.locator('input,textarea,select').count() >= 2 ? main : null;
+  return null;
 }
 
 function valueFor(label, p, job = {}) {
   const text = label.toLowerCase().replace(/[_-]+/g, ' ');
   if (/e-?mail/.test(text)) return p.email;
   if (/phone|mobile|tel[eé]fono|celular/.test(text)) return p.phone;
-  if (/current company|current employer|present employer|empresa actual/.test(text)) return p.currentCompany || '';
+  if (/current company|current employer|present employer|most recent employer|empresa actual|empleador actual/.test(text)) return p.currentCompany || 'Not currently employed';
   if (/full name|your name|^name$|nombre completo/.test(text)) return p.name;
   if (/first name|given name|nombre\b/.test(text) && !/last|apellido/.test(text)) return p.name?.trim().split(/\s+/)[0];
   if (/last name|family name|surname|apellido/.test(text)) return p.name?.trim().split(/\s+/).slice(1).join(' ');
   if (/country|pa[ií]s/.test(text)) return p.location?.split(',').at(-1).trim();
   if (/linkedin/.test(text)) return p.linkedin || (/linkedin/i.test(p.link || '') ? p.link : '');
+  if (/password|contrase(?:n|ñ)a/.test(text)) return '';
   if (/portfolio|website|web site|personal site|sitio web/.test(text)) return p.portfolio || p.link;
   if (/postal|zip code|postcode/.test(text)) return p.postalCode || '';
   if (/state|province|provincia/.test(text)) return p.location?.split(',').at(-2)?.trim() || '';
@@ -1100,10 +1184,22 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
   const total = await controls.count();
   for (let i = 0; i < total; i += 1) {
     const field = controls.nth(i);
-    const type = (await field.getAttribute('type') || '').toLowerCase();
-    const required = await field.getAttribute('required') !== null || await field.getAttribute('aria-required') === 'true';
+    const type = (await field.getAttribute('type', { timeout: 1200 }).catch(() => '') || '').toLowerCase();
+    const fieldContext = await field.evaluate((el) => {
+      const parts = [];
+      for (const label of [...(el.labels || [])]) if (label.innerText) parts.push(label.innerText);
+      let node = el.parentElement;
+      for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
+        const text = (node.innerText || '').replace(/\s+/g, ' ').trim();
+        if (text && text.length <= 280) parts.push(text);
+      }
+      return [...new Set(parts)].join(' ');
+    }).catch(() => '');
+    const required = await field.getAttribute('required', { timeout: 1200 }).catch(() => null) !== null
+      || await field.getAttribute('aria-required', { timeout: 1200 }).catch(() => '') === 'true'
+      || /(?:\*|✱)/.test(fieldContext);
     if (type === 'file') {
-      const hint = `${await field.getAttribute('name') || ''} ${await field.getAttribute('aria-label') || ''} ${await field.getAttribute('accept') || ''}`.toLowerCase();
+      const hint = `${await field.getAttribute('name', { timeout: 1200 }).catch(() => '') || ''} ${await field.getAttribute('id', { timeout: 1200 }).catch(() => '') || ''} ${await field.getAttribute('aria-label', { timeout: 1200 }).catch(() => '') || ''} ${await field.getAttribute('accept', { timeout: 1200 }).catch(() => '') || ''}`.toLowerCase();
       if (/resume|cv|curriculum|attachment|pdf/.test(hint)) {
         await field.setInputFiles(cvPath).catch(() => {});
         if (required && !await field.evaluate((el) => el.files?.length > 0).catch(() => false)) missing.push(hint || 'CV adjunto');
@@ -1114,7 +1210,7 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
     if (['checkbox', 'radio'].includes(type)) {
       const metadata = await field.evaluate((el) => ({
         option: el.labels ? [...el.labels].map((item) => item.innerText).join(' ').trim() : el.getAttribute('aria-label') || el.value || 'confirmación legal',
-        question: el.closest('.application-question,fieldset,[role="group"]')?.innerText?.trim() || el.closest('label')?.innerText?.trim() || el.name || '',
+        question: el.closest('.application-question,fieldset,[role="group"]')?.innerText?.trim() || el.parentElement?.parentElement?.innerText?.trim() || el.closest('label')?.innerText?.trim() || el.name || '',
         group: el.closest('.application-question,fieldset,[role="group"]')?.id || el.closest('.application-question,fieldset,[role="group"]')?.getAttribute('data-qa') || el.name || '',
       }));
       const option = metadata.option;
@@ -1127,7 +1223,7 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
       }
       continue;
     }
-    const label = await field.evaluate((el) => [el.labels ? [...el.labels].map((item) => item.innerText).join(' ') : '', el.closest('.application-question,fieldset,[role="group"]')?.innerText || '', el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || '', el.getAttribute('name') || '', el.id || ''].join(' '));
+    const label = `${fieldContext} ${await field.evaluate((el) => [el.closest('.application-question,fieldset,[role="group"]')?.innerText || '', el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || '', el.getAttribute('name') || '', el.id || ''].join(' ')).catch(() => '')}`;
     const mapped = valueFor(label, p, job);
     if (mapped && type !== 'file' && await field.inputValue().catch(() => '') === '') {
       if (await field.evaluate((el) => el.tagName === 'SELECT')) {
