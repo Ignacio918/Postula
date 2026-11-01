@@ -245,6 +245,9 @@ $xamlText = @'
             <StackPanel Grid.Column="6" Margin="16,12"><TextBlock Text="Confirmadas" FontSize="12" Foreground="#A0A4A8"/><TextBlock x:Name="MetricSubmitted" Text="0" FontSize="25" Foreground="#F1F2F3" Margin="0,2,0,0"/><TextBlock Text="por el portal" FontSize="11" Foreground="#858A8E" Margin="0,1,0,0"/></StackPanel>
           </Grid>
         </Border>
+        <Border x:Name="AutomationNotice" Background="#292319" BorderBrush="#80652D" BorderThickness="1" CornerRadius="8" Padding="14,11" Margin="0,0,0,16" Visibility="Collapsed">
+          <StackPanel><TextBlock x:Name="AutomationNoticeTitle" Text="El agente todavía no puede enviar candidaturas" FontSize="13" FontWeight="SemiBold" Foreground="#F1D49A"/><TextBlock x:Name="AutomationNoticeText" Text="Revisá la configuración del agente." FontSize="12" Foreground="#D8C9A8" Margin="0,4,0,0" TextWrapping="Wrap"/></StackPanel>
+        </Border>
         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="1.8*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="1*"/></Grid.ColumnDefinitions>
           <StackPanel Grid.Column="0">
             <Border x:Name="MatchesCard" Background="#181818" BorderBrush="#181818" BorderThickness="0" CornerRadius="8" Margin="0,0,0,16">
@@ -359,6 +362,9 @@ $script:BlueBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromStri
 $script:GreenBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#63C5A3')
 $script:GrayBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#777D82')
 $script:SearchPlaceholder = $window.FindName('SearchPlaceholder')
+$script:AutomationNotice = $window.FindName('AutomationNotice')
+$script:AutomationNoticeTitle = $window.FindName('AutomationNoticeTitle')
+$script:AutomationNoticeText = $window.FindName('AutomationNoticeText')
 
 function Test-AgentApi {
   try { Invoke-RestMethod -Uri "$($script:ApiBase)/api/status" -TimeoutSec 2 | Out-Null; return $true } catch { return $false }
@@ -774,6 +780,18 @@ function Update-Window($data) {
   $script:MetricMatched.Text = [string]$matched
   $script:MetricReady.Text = [string](@($data.pendingApprovals).Count)
   $script:MetricSubmitted.Text = [string]$submitted
+  if ($data.autoSubmitEnabled -ne $true) {
+    $script:AutomationNotice.Visibility = [System.Windows.Visibility]::Visible
+    $script:AutomationNoticeTitle.Text = 'No se enviarán candidaturas: el envío automático está apagado'
+    $best = $status.bestMatch
+    if ($best -and [int]$best.match -lt [int]$data.minimumMatch) {
+      $script:AutomationNoticeText.Text = "En Configurar perfil, activá 'Enviar automáticamente' escribiendo ENVIAR. Además, el encaje mínimo está en $($data.minimumMatch)%; la mejor oferta actual marca $($best.match)% ($($best.company)). Podés ajustar el mínimo para que entre en revisión. Ninguna candidatura se envía si faltan respuestas o aparece CAPTCHA."
+    } else {
+      $script:AutomationNoticeText.Text = 'En Configurar perfil, activá “Enviar automáticamente” escribiendo ENVIAR. Postula solo enviará formularios completos; si faltan respuestas o aparece CAPTCHA, te pedirá revisión.'
+    }
+  } else {
+    $script:AutomationNotice.Visibility = [System.Windows.Visibility]::Collapsed
+  }
   $script:PhaseLabel.Text = $phase
   $script:PhaseLabelTop.Text = $phase
   $script:SidebarPhase.Text = $phase
