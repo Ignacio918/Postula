@@ -156,6 +156,9 @@ while (keepRunning) {
     .sort((a, b) => regionPriority(a, profile) - regionPriority(b, profile) || b.match - a.match)
     .slice(0, 500);
   const matchCount = scopedJobs.filter((job) => Number(job.score ?? scoreJob(job, profile)) >= minimumMatch && !state.excluded.includes(job.id)).length;
+  const bestMatchJob = scopedJobs
+    .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
+    .sort((a, b) => b.match - a.match)[0];
   const matches = scopedJobs.filter((job) => Number(job.score ?? scoreJob(job, profile)) >= minimumMatch)
     .sort((a, b) => regionPriority(a, profile) - regionPriority(b, profile) || Number(b.score ?? scoreJob(b, profile)) - Number(a.score ?? scoreJob(a, profile)))
     .map((job) => ({
@@ -164,7 +167,7 @@ while (keepRunning) {
     region: regionLabel(job, profile),
     url: job.applicationUrl || job.applyUrl || job.url,
   })).slice(0, 60);
-  await setLiveStatus({ phase: candidates.length ? 'Revisando ofertas compatibles' : 'Búsqueda en curso', jobsFound: jobs.length, offersInScope: scopedJobs.length, matched: matchCount, matches, offerCatalog, currentJob: null, error: '' });
+  await setLiveStatus({ phase: candidates.length ? 'Revisando ofertas compatibles' : 'Búsqueda en curso', jobsFound: jobs.length, offersInScope: scopedJobs.length, matched: matchCount, bestMatch: bestMatchJob ? { company: bestMatchJob.company, role: bestMatchJob.role, match: bestMatchJob.match, region: regionLabel(bestMatchJob, profile) } : null, matches, offerCatalog, currentJob: null, error: '' });
   if (!candidates.length) console.log(`Ciclo completo · ${matchCount} ofertas coinciden con tu perfil; ninguna nueva para revisar.`);
   else console.log(`Agente Postula · ${candidates.length} ofertas nuevas · ${matchCount} compatibles · encaje mínimo ${minimumMatch}% · máximo ${dailyLimit} envíos/día`);
 

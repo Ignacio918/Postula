@@ -759,7 +759,9 @@ function Update-Window($data) {
   Render-Approvals $data.pendingApprovals
   Render-Applications $data.offers
   $topErrors = @($data.offers | Where-Object { $_.status -in @('needs_attention','error','no_application_form') } | Select-Object -First 1)
-  $script:DiagnosticsLabel.Text = if ($topErrors.Count) { "Último bloqueo: $($topErrors[0].company) · $(Get-StatusLabel ([string]$topErrors[0].status)). $([string]$topErrors[0].reason)" } else { 'Fuentes públicas activas. Cada búsqueda lee ofertas y aplica el puntaje local del perfil.' }
+  if ($matched -eq 0 -and $status.bestMatch) { $script:DiagnosticsLabel.Text = "El mínimo configurado es $($data.minimumMatch)%. La oferta más cercana es $($status.bestMatch.role) · $($status.bestMatch.company), con $($status.bestMatch.match)% ($($data.minimumMatch - $status.bestMatch.match) puntos por debajo). Podés bajar el mínimo en Preferencias de búsqueda." }
+  elseif ($topErrors.Count) { $script:DiagnosticsLabel.Text = "Último bloqueo: $($topErrors[0].company) · $(Get-StatusLabel ([string]$topErrors[0].status)). $([string]$topErrors[0].reason)" }
+  else { $script:DiagnosticsLabel.Text = 'Fuentes públicas activas. Cada búsqueda lee ofertas y aplica el puntaje local del perfil.' }
   if ($script:AgentProcess -and $script:AgentProcess.HasExited) { $script:OwnsAgent = $false; $script:AgentProcess = $null }
   $script:AgentToggle.Content = 'Detener agente'
 }
