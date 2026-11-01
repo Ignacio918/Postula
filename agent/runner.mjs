@@ -222,8 +222,12 @@ while (keepRunning) {
             result.status = 'needs_attention';
             result.reason = `Formulario completo, pero ya se alcanzó el máximo de ${dailyLimit} envíos de hoy.`;
           } else {
-          await setLiveStatus({ currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Formulario listo · esperando tu confirmación' } });
-          const approved = await requestDashboardApproval(job, page);
+          if (profile.autoSubmit === true) {
+            await setLiveStatus({ currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Formulario completo · envío automático' } });
+          } else {
+            await setLiveStatus({ currentJob: { company: job.company, role: job.role, match: job.match, stage: 'Formulario listo · esperando tu confirmación' } });
+          }
+          const approved = profile.autoSubmit === true || await requestDashboardApproval(job, page);
           if (state.excluded.includes(job.id)) {
             result.status = 'excluded';
             result.reason = 'Excluida desde Postula.';
@@ -426,6 +430,7 @@ async function startDashboard() {
         historyTotal: offers.length,
         minimumMatch,
         dailyLimit,
+        autoSubmitEnabled: profile.autoSubmit === true,
         jobsFound: liveStatus.jobsFound || 0,
         offersInScope: liveStatus.offersInScope || 0,
       }));
@@ -467,6 +472,12 @@ async function startDashboard() {
         const nextProfile = { ...profile };
         for (const key of ['name', 'email', 'phone', 'location', 'roles', 'mode', 'resume', 'summary', 'experience', 'skills', 'link', 'linkedin', 'portfolio', 'currentCompany', 'salaryExpectation', 'workAuthorization', 'regionPreference', 'languagePreference']) {
           if (typeof incoming[key] === 'string') nextProfile[key] = incoming[key].slice(0, key === 'resume' || key === 'experience' ? 250000 : 4000).trim();
+        }
+        if (typeof incoming.autoSubmit === 'boolean') {
+          if (incoming.autoSubmit && profile.autoSubmit !== true && body.submitConfirmation !== 'ENVIAR') {
+            throw new Error('Para activar el envío automático, escribí exactamente ENVIAR en el campo de confirmación.');
+          }
+          nextProfile.autoSubmit = incoming.autoSubmit;
         }
         nextProfile.mode ||= 'Remoto';
         if (!nextProfile.name || !nextProfile.email || !nextProfile.roles || !nextProfile.resume) throw new Error('Completá nombre, email, puestos objetivo y CV.');

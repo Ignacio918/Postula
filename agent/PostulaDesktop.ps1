@@ -462,6 +462,9 @@ function Show-ProfileDialog {
   $interval = Add-ProfileField $preferencesPanel 'Revisar ofertas cada (minutos, desde 1)' ([string]$(if ($saved.settings.intervalMinutes) { $saved.settings.intervalMinutes } else { 30 }))
   $searchNote = New-Object System.Windows.Controls.TextBlock; $searchNote.Text = 'Esto define cada ciclo de búsqueda. No aumenta por sí solo el número de formularios completables; las candidaturas tienen un límite separado.'; $searchNote.FontSize = 11; $searchNote.Foreground = $script:MutedBrush; $searchNote.TextWrapping = 'Wrap'; $searchNote.Margin = '0,5,0,0'; [void]$preferencesPanel.Children.Add($searchNote)
   $dailyLimit = Add-ProfileField $preferencesPanel 'Límite diario de candidaturas' ([string]$(if ($saved.settings.dailyLimit) { $saved.settings.dailyLimit } elseif ($p.dailyLimit) { $p.dailyLimit } else { 5 }))
+  $autoSubmit = New-Object System.Windows.Controls.CheckBox; $autoSubmit.Content = 'Enviar automáticamente los formularios completos'; $autoSubmit.IsChecked = [bool]$p.autoSubmit; $autoSubmit.Foreground = $script:InkBrush; $autoSubmit.Margin = '0,14,0,0'; [void]$preferencesPanel.Children.Add($autoSubmit)
+  $autoSubmitNote = New-Object System.Windows.Controls.TextBlock; $autoSubmitNote.Text = 'Postula enviará formularios completos cuando no haya CAPTCHA ni preguntas pendientes. Para activarlo por primera vez, escribí ENVIAR abajo. Las candidaturas enviadas no se pueden deshacer.'; $autoSubmitNote.FontSize = 11; $autoSubmitNote.Foreground = $script:MutedBrush; $autoSubmitNote.TextWrapping = 'Wrap'; $autoSubmitNote.Margin = '0,4,0,0'; [void]$preferencesPanel.Children.Add($autoSubmitNote)
+  $submitConfirmation = Add-ProfileField $preferencesPanel 'Confirmación única para activar (escribí ENVIAR)' ''
   $answersCard = New-Object System.Windows.Controls.Border; $answersCard.Background = $cardBrush; $answersCard.BorderBrush = $cardBorderBrush; $answersCard.BorderThickness = '1'; $answersCard.CornerRadius = '8'; $answersCard.Padding = '16'; $answersCard.Margin = '0,12,0,0'; [void]$form.Children.Add($answersCard)
   $answersPanel = New-Object System.Windows.Controls.StackPanel; $answersCard.Child = $answersPanel
   $answersHeading = New-Object System.Windows.Controls.TextBlock; $answersHeading.Text = 'Respuestas para formularios'; $answersHeading.FontSize = 16; $answersHeading.FontWeight = 'SemiBold'; $answersHeading.Foreground = $script:InkBrush; [void]$answersPanel.Children.Add($answersHeading)
@@ -508,6 +511,7 @@ function Show-ProfileDialog {
         roles = $roles.Text.Trim(); mode = [string]$mode.SelectedItem; resume = $resume.Text.Trim(); summary = $summary.Text.Trim();
         experience = [string]$p.experience; skills = $skills.Text.Trim(); link = $portfolio.Text.Trim(); portfolio = $portfolio.Text.Trim();
         salaryExpectation = $salary.Text.Trim(); workAuthorization = $authorization.Text.Trim();
+        autoSubmit = [bool]$autoSubmit.IsChecked;
         regionPreference = @('regional-first', 'regional-only', 'balanced')[[int]$region.SelectedIndex];
         languagePreference = @('spanish-first', 'spanish-only', 'any')[[int]$language.SelectedIndex];
         applicationAnswers = $p.applicationAnswers
@@ -517,9 +521,15 @@ function Show-ProfileDialog {
         if ($line -match '^\s*(.{3,160}?)\s*=\s*(.{1,1200})\s*$') { $answerFields[$matches[1].Trim()] = $matches[2].Trim() }
       }
       $profileData.applicationAnswers = @{ radio = @($p.applicationAnswers.radio); checkboxes = @($p.applicationAnswers.checkboxes); fields = $answerFields }
-      $response = Invoke-PostulaApi '/api/configure' @{ profile = $profileData; minimumMatch = $minimumMatchValue; dailyLimit = $dailyLimitValue; intervalMinutes = $intervalValue }
+      $configureBody = @{ profile = $profileData; minimumMatch = $minimumMatchValue; dailyLimit = $dailyLimitValue; intervalMinutes = $intervalValue }
+      if ($profileData.autoSubmit -and $p.autoSubmit -ne $true) {
+        if ($submitConfirmation.Text.Trim() -cne 'ENVIAR') { throw 'Para activar el envío automático por primera vez, escribí exactamente ENVIAR en el campo de confirmación.' }
+        $configureBody.submitConfirmation = 'ENVIAR'
+      }
+      $response = Invoke-PostulaApi '/api/configure' $configureBody
       $dialog.Close()
-      [System.Windows.MessageBox]::Show("Perfil guardado. El agente inició una búsqueda con $($response.minimumMatch)% de encaje y volverá a revisar cada $($response.intervalMinutes) minutos. El máximo de postulaciones es un ajuste separado.", 'Postula') | Out-Null
+      $sendMode = if ($response.autoSubmitEnabled) { 'Los formularios completos se enviarán automáticamente cuando el portal no pida CAPTCHA ni respuestas pendientes.' } else { 'Las candidaturas completas seguirán esperando tu confirmación manual.' }
+      [System.Windows.MessageBox]::Show("Perfil guardado. El agente inició una búsqueda con $($response.minimumMatch)% de encaje y volverá a revisar cada $($response.intervalMinutes) minutos. $sendMode", 'Postula') | Out-Null
     } catch { $button.IsEnabled = $true; $button.Content = 'Guardar y buscar ahora'; [System.Windows.MessageBox]::Show("Revisá los campos obligatorios y volvé a intentar:`n$($_.Exception.Message)", 'Postula', 'OK', 'Warning') | Out-Null }
   }.GetNewClosure())
   [void]$dialog.ShowDialog()
