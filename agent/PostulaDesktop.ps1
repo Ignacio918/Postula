@@ -413,8 +413,34 @@ function Add-ProfileField($Panel, [string]$Label, [string]$Value, [int]$Height =
   return $inputBox
 }
 
+function Repair-ProfileText([string]$Value) {
+  if ([string]::IsNullOrEmpty($Value)) { return $Value }
+  $repaired = $Value
+  # PowerShell 5.1 can misread UTF-8 JSON as the active Windows code page.
+  # Recover the legacy text by decoding its original UTF-8 bytes.
+  for ($pass = 0; $pass -lt 5; $pass++) {
+    if ($repaired.IndexOf([char]0x00C3) -lt 0 -and $repaired.IndexOf([char]0x00C2) -lt 0 -and $repaired.IndexOf([char]0x00E2) -lt 0 -and $repaired.IndexOf([char]0x00F0) -lt 0) { break }
+    $bytes = [System.Text.Encoding]::GetEncoding(1252).GetBytes($repaired)
+    $candidate = [System.Text.Encoding]::UTF8.GetString($bytes)
+    if ($candidate -eq $repaired -or $candidate.Contains([char]0xFFFD)) { break }
+    $repaired = $candidate
+  }
+  return $repaired
+}
+
 function Show-ProfileDialog {
-  try { $configJson = [System.IO.File]::ReadAllText($script:ConfigPath, [System.Text.Encoding]::UTF8); $saved = ConvertFrom-Json -InputObject $configJson; $p = $saved.profile } catch { $saved = [pscustomobject]@{}; $p = [pscustomobject]@{} }
+  try {
+    $configJson = [System.IO.File]::ReadAllText($script:ConfigPath, [System.Text.Encoding]::UTF8)
+    $saved = ConvertFrom-Json -InputObject $configJson
+    $p = $saved.profile
+    foreach ($property in $p.PSObject.Properties) {
+      if ($property.Value -is [string]) { $property.Value = Repair-ProfileText $property.Value }
+    }
+    if ($p.salaryExpectation -match '^USD\s*18,000.*?30,000') {
+      $salarySuffix = if ($p.salaryExpectation -match 'per year') { 'per year' } else { 'por año' }
+      $p.salaryExpectation = 'USD 18,000' + [char]0x2013 + "30,000 $salarySuffix"
+    }
+  } catch { $saved = [pscustomobject]@{}; $p = [pscustomobject]@{} }
   $dialog = New-Object System.Windows.Window
   $dialog.Title = 'Configurá tu perfil y búsqueda · Postula'; $dialog.Width = 780; $dialog.Height = 860; $dialog.MinWidth = 680; $dialog.MinHeight = 700
   $dialog.WindowStartupLocation = 'CenterOwner'; $dialog.Owner = $window; $dialog.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#111315')
