@@ -414,7 +414,7 @@ function Add-ProfileField($Panel, [string]$Label, [string]$Value, [int]$Height =
 }
 
 function Show-ProfileDialog {
-  try { $saved = Get-Content -LiteralPath $script:ConfigPath -Raw | ConvertFrom-Json; $p = $saved.profile } catch { $saved = [pscustomobject]@{}; $p = [pscustomobject]@{} }
+  try { $configJson = [System.IO.File]::ReadAllText($script:ConfigPath, [System.Text.Encoding]::UTF8); $saved = ConvertFrom-Json -InputObject $configJson; $p = $saved.profile } catch { $saved = [pscustomobject]@{}; $p = [pscustomobject]@{} }
   $dialog = New-Object System.Windows.Window
   $dialog.Title = 'Configurá tu perfil y búsqueda · Postula'; $dialog.Width = 780; $dialog.Height = 860; $dialog.MinWidth = 680; $dialog.MinHeight = 700
   $dialog.WindowStartupLocation = 'CenterOwner'; $dialog.Owner = $window; $dialog.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#111315')
