@@ -101,22 +101,31 @@ while (keepRunning) {
   const results = previousResults.results || [];
   const excludedOffers = new Set(results.filter((entry) => entry.status === 'excluded').map(offerFingerprint));
   const appliedOffers = new Set(results.filter((entry) => ['submitted', 'submitted_unconfirmed'].includes(entry.status)).map(offerFingerprint));
-  const pendingOffers = new Set(results.filter((entry) => ['needs_attention', 'ready_to_submit'].includes(entry.status)).map(offerFingerprint));
+  const latestById = new Map();
+  for (const entry of results) if (entry.jobId) latestById.set(entry.jobId, entry);
+  const retryableReady = new Set([...latestById.values()]
+    .filter((entry) => entry.status === 'ready_to_submit'
+      && !approvalRequests.has(entry.jobId)
+      && Date.now() - Date.parse(entry.at || 0) >= 15 * 60 * 1000)
+    .map((entry) => entry.jobId));
+  const pendingOffers = new Set(results
+    .filter((entry) => ['needs_attention', 'ready_to_submit'].includes(entry.status) && !retryableReady.has(entry.jobId))
+    .map(offerFingerprint));
   for (const prior of results) {
     if (!prior.jobId) continue;
     if (!state.discovered.includes(prior.jobId)) state.discovered.push(prior.jobId);
     if (['needs_attention', 'ready_to_submit', 'submitted_unconfirmed'].includes(prior.status) && !state.pending.includes(prior.jobId)) state.pending.push(prior.jobId);
   }
-  if ((state.runnerVersion || 0) < 3) {
-    const latestById = new Map();
-    for (const entry of results) if (entry.jobId) latestById.set(entry.jobId, entry);
+  if ((state.runnerVersion || 0) < 4) {
     state.retryQueue = [...latestById.values()]
       .filter((entry) => ['error', 'no_application_form'].includes(entry.status)
-        || (entry.status === 'needs_attention' && /no mostró un formulario/i.test(entry.reason || '')))
+        || (entry.status === 'needs_attention' && /no mostró un formulario/i.test(entry.reason || ''))
+        || retryableReady.has(entry.jobId))
       .slice(-30).reverse().map((entry) => entry.jobId);
-    state.runnerVersion = 3;
+    state.runnerVersion = 4;
     if (state.retryQueue.length) console.log(`Reintentaré ${state.retryQueue.length} avisos que antes fallaron al detectar el formulario.`);
   }
+  for (const jobId of retryableReady) if (!state.retryQueue.includes(jobId)) state.retryQueue.push(jobId);
   const scopedJobs = jobs.filter((job) => inScope(job, profile));
   const candidates = scopedJobs
     .map((job) => ({ ...job, match: Number(job.score ?? scoreJob(job, profile)) }))
@@ -557,7 +566,7 @@ async function closeDashboard(server) {
 }
 
 async function requestDashboardApproval(job, page) {
-  const expiresAt = Date.now() + 30 * 60 * 1000;
+  const expiresAt = Date.now() + 5 * 60 * 1000;
   const request = {
     jobId: job.id,
     company: job.company,
@@ -1206,6 +1215,21 @@ function valueFor(label, p, job = {}) {
   return '';
 }
 
+function configuredAnswerFor(question, profile = {}) {
+  const normalizedQuestion = normalizeAnswer(question);
+  const answers = profile.applicationAnswers?.fields;
+  if (!normalizedQuestion || !answers || typeof answers !== 'object') return '';
+  for (const [prompt, answer] of Object.entries(answers)) {
+    const normalizedPrompt = normalizeAnswer(prompt);
+    if (normalizedPrompt.length >= 3 && normalizedQuestion.includes(normalizedPrompt)) return String(answer || '').trim();
+  }
+  return '';
+}
+
+function needsManualAnswer(question = '') {
+  return /consent|\bi agree\b|privacy|terms of|certif|declare|background|criminal|race|ethnicity|gender|disability|veteran|demographic|captcha|verification/i.test(question);
+}
+
 async function fillKnownFields(form, p, cvPath, job = {}) {
   const missing = [];
   const radioGroups = new Map();
@@ -1220,19 +1244,31 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
     const field = controls.nth(i);
     if (!(await field.count().catch(() => 0))) { i += 1; continue; }
     const type = (await field.getAttribute('type', { timeout: 700 }).catch(() => '') || '').toLowerCase();
-    const fieldContext = await field.evaluate((el) => {
-      const parts = [];
-      for (const label of [...(el.labels || [])]) if (label.innerText) parts.push(label.innerText);
-      let node = el.parentElement;
-      for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
-        const text = (node.innerText || '').replace(/\s+/g, ' ').trim();
-        if (text && text.length <= 280) parts.push(text);
-      }
-      return [...new Set(parts)].join(' ');
-    }).catch(() => '');
-    const required = await field.getAttribute('required', { timeout: 1200 }).catch(() => null) !== null
-      || await field.getAttribute('aria-required', { timeout: 1200 }).catch(() => '') === 'true'
-      || /(?:\*|✱)/.test(fieldContext);
+    const metadata = await field.evaluate((el) => {
+      const text = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+      const labels = [...(el.labels || [])].map((item) => text(item.innerText)).filter(Boolean);
+      const group = el.closest('.application-question,fieldset,[role="group"]');
+      const groupText = text(group?.innerText || '');
+      const explicit = [
+        ...labels,
+        text(el.getAttribute('aria-label')),
+        text(el.getAttribute('placeholder')),
+        text(el.getAttribute('aria-labelledby')?.split(/\s+/).map((id) => document.getElementById(id)?.innerText || '').join(' ')),
+        text(el.getAttribute('name')?.replace(/[_-]+/g, ' ')),
+        text(el.id?.replace(/[_-]+/g, ' ')),
+      ].filter(Boolean);
+      return {
+        label: [...new Set([...labels, ...explicit.slice(labels.length)])].join(' '),
+        question: groupText || labels.join(' '),
+        required: Boolean(el.required || el.getAttribute('aria-required') === 'true'
+          || group?.getAttribute('aria-required') === 'true'
+          || /(?:\*|✱)/.test(groupText)
+          || labels.some((item) => /(?:\*|✱)\s*$/.test(item))
+          || (!labels.length && /(?:\*|✱)\s*$/.test(text(el.getAttribute('aria-label'))))),
+      };
+    }).catch(() => ({ label: '', question: '', required: false }));
+    const fieldContext = metadata.label;
+    const required = metadata.required;
     if (type === 'file') {
       const hint = `${await field.getAttribute('name', { timeout: 1200 }).catch(() => '') || ''} ${await field.getAttribute('id', { timeout: 1200 }).catch(() => '') || ''} ${await field.getAttribute('aria-label', { timeout: 1200 }).catch(() => '') || ''} ${await field.getAttribute('accept', { timeout: 1200 }).catch(() => '') || ''}`.toLowerCase();
       if (/resume|cv|curriculum|attachment|pdf/.test(hint)) {
@@ -1247,7 +1283,7 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
     if (['checkbox', 'radio'].includes(type)) {
       const metadata = await field.evaluate((el) => ({
         option: el.labels ? [...el.labels].map((item) => item.innerText).join(' ').trim() : el.getAttribute('aria-label') || el.value || 'confirmación legal',
-        question: el.closest('.application-question,fieldset,[role="group"]')?.innerText?.trim() || el.parentElement?.parentElement?.innerText?.trim() || el.closest('label')?.innerText?.trim() || el.name || '',
+        question: el.closest('.application-question,fieldset,[role="group"]')?.innerText?.trim() || [...(el.labels || [])].map((label) => label.innerText).join(' ') || el.name || '',
         group: el.closest('.application-question,fieldset,[role="group"]')?.id || el.closest('.application-question,fieldset,[role="group"]')?.getAttribute('data-qa') || el.name || '',
       }));
       const option = metadata.option;
@@ -1255,14 +1291,16 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
       const groups = type === 'radio' ? radioGroups : checkboxGroups;
       if (!groups.has(groupName)) groups.set(groupName, { label: metadata.question || option, required });
       const automaticRadio = type === 'radio' && autoRadioOption(metadata.question, option, p, job);
-      if ((type === 'radio' ? selectedRadios : selectedCheckboxes).has(normalizeAnswer(option)) || automaticRadio) {
+      const manualOnly = needsManualAnswer(metadata.question);
+      const configured = !manualOnly && normalizeAnswer(configuredAnswerFor(metadata.question, p)) === normalizeAnswer(option);
+      if (!manualOnly && ((type === 'radio' ? selectedRadios : selectedCheckboxes).has(normalizeAnswer(option)) || automaticRadio || configured)) {
         await field.check({ timeout: 1500 }).catch(() => {});
       }
       i += 1;
       continue;
     }
-    const label = `${fieldContext} ${await field.evaluate((el) => [el.closest('.application-question,fieldset,[role="group"]')?.innerText || '', el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || '', el.getAttribute('name') || '', el.id || ''].join(' ')).catch(() => '')}`;
-    const mapped = valueFor(label, p, job);
+    const label = `${metadata.question} ${fieldContext}`.replace(/\s+/g, ' ').trim();
+    const mapped = valueFor(label, p, job) || (needsManualAnswer(label) ? '' : configuredAnswerFor(label, p));
     if (mapped && type !== 'file' && await field.inputValue().catch(() => '') === '') {
       if (await field.evaluate((el) => el.tagName === 'SELECT')) {
         const optionLabels = await field.locator('option').allTextContents().catch(() => []);
@@ -1277,7 +1315,7 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
       }
     }
     const current = await field.inputValue().catch(() => '');
-    if (required && !current) missing.push(label.trim() || `campo ${i + 1}`);
+    if (required && !current) missing.push((label.trim() || `campo ${i + 1}`).slice(0, 180));
     i += 1;
   }
   const invalidRequired = await form.locator(':invalid:visible').evaluateAll((nodes) => nodes.map((el) => {
@@ -1293,7 +1331,7 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
     const isSelected = await form.locator('input[type="checkbox"]:checked').evaluateAll((nodes, name) => nodes.some((node) => node.name === name), groupName).catch(() => false);
     if (group.required && !isSelected) missing.push(group.label);
   }
-  return { missing: [...new Set(missing)] };
+  return { missing: [...new Set(missing)].slice(0, 12) };
 }
 
 function autoRadioOption(question = '', option = '', profile = {}, job = {}) {
