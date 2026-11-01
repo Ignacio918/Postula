@@ -240,8 +240,11 @@ while (keepRunning) {
       result.status = 'needs_attention';
       result.reason = 'El portal requiere una verificación humana. Abrí el aviso desde Actividad reciente si querés revisarlo.';
     } else if (/No encontré un formulario de candidatura reconocible/i.test(message)) {
-      result.status = 'no_application_form';
-      result.reason = `No se detectó un formulario automático. Página actual: ${result.url || job.url}`;
+      const verificationRequired = page && await hasVerificationGate(page).catch(() => false);
+      result.status = verificationRequired ? 'needs_attention' : 'no_application_form';
+      result.reason = verificationRequired
+        ? 'El portal no cargó el formulario y presentó una verificación anti-bot. Requiere revisión manual; Postula no intenta resolverla.'
+        : `No se detectó un formulario automático. Página actual: ${result.url || job.url}`;
     } else {
       result.status = 'error';
       result.reason = message.slice(0, 400);
@@ -930,9 +933,31 @@ function scoreJob(job, p) {
     jobNorm += weighted * weighted;
   }
   const similarity = dot / Math.max(Math.sqrt(profileNorm * jobNorm), 0.0001);
-  const target = roleTerms(p.roles || ''), roleWords = roleTerms(job.role);
-  const roleFit = target.length ? roleWords.filter((word) => target.includes(word)).length / Math.max(roleWords.length, 1) : 0;
-  return Math.max(0, Math.min(98, Math.round(similarity * 72 + roleFit * 26)));
+  const normalizeTitle = (value) => String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b(senior|sr|junior|jr|staff|principal|lead|associate|mid-level|midlevel|ii|iii)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+  const roleTargets = String(p.roles || '').split(/[,;\n]+/).map(normalizeTitle).filter(Boolean);
+  const title = normalizeTitle(job.role);
+  const targetFamilies = roleTargets.map((target) => ({
+    target,
+    family: /product designer|product design|ux designer|ui designer|ux ui/.test(target) ? 'product-design'
+      : /design engineer/.test(target) ? 'design-engineering'
+        : /project manager|program manager/.test(target) ? 'project-management' : '',
+  }));
+  const jobFamily = /product designer|product design|ux designer|ui designer|ux ui/.test(title) ? 'product-design'
+    : /design engineer/.test(title) ? 'design-engineering'
+      : /project manager|program manager/.test(title) ? 'project-management' : '';
+  const titleFit = targetFamilies.reduce((best, entry) => {
+    const targetWords = roleTerms(entry.target);
+    const overlap = targetWords.length ? targetWords.filter((word) => roleTerms(title).includes(word)).length / targetWords.length : 0;
+    const familyFit = entry.family && entry.family === jobFamily
+      ? (jobFamily === 'project-management' ? 0.9 : 0.78) : 0;
+    const containsPhrase = entry.target && title.includes(entry.target) ? 1 : 0;
+    return Math.max(best, overlap, familyFit, containsPhrase);
+  }, 0);
+  // Titles are a strong signal for this user's configured roles; sparse ATS feeds
+  // often contain no description, so text similarity alone wrongly scored these 0.
+  return Math.max(0, Math.min(98, Math.round(titleFit * 68 + similarity * 30)));
 }
 
 function inScope(job, p) {
@@ -1027,6 +1052,13 @@ function htmlEscape(value = '') { return String(value).replace(/[&<>"']/g, (c) =
 
 async function hasBlocker(page) {
   return /captcha|verify (?:that )?you(?:'| a)?re human|checking your browser|security verification|robot check|security check|are you a robot/i.test(await page.locator('body').innerText({ timeout: 5000 }).catch(() => ''));
+}
+async function hasVerificationGate(page) {
+  if (await hasBlocker(page)) return true;
+  const recaptchaPresent = page.frames().some((frame) => /recaptcha|hcaptcha|arkoselabs/i.test(frame.url()));
+  if (!recaptchaPresent) return false;
+  const visibleControls = await page.locator('input:visible,textarea:visible,select:visible').count().catch(() => 0);
+  return visibleControls === 0;
 }
 async function waitForHumanChallenge(page, job) {
   console.log(`\nEl portal solicita una verificación humana: ${job.company} · ${job.role}`);
@@ -1181,10 +1213,13 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
   const selectedRadios = new Set((p.applicationAnswers?.radio || []).map(normalizeAnswer));
   const selectedCheckboxes = new Set((p.applicationAnswers?.checkboxes || []).map(normalizeAnswer));
   const controls = form.locator('input:not([type="hidden"]):not([type="submit"]):not([type="button"]),textarea,select');
-  const total = await controls.count();
-  for (let i = 0; i < total; i += 1) {
+  let i = 0;
+  let visited = 0;
+  while (i < await controls.count() && visited < 120) {
+    visited += 1;
     const field = controls.nth(i);
-    const type = (await field.getAttribute('type', { timeout: 1200 }).catch(() => '') || '').toLowerCase();
+    if (!(await field.count().catch(() => 0))) { i += 1; continue; }
+    const type = (await field.getAttribute('type', { timeout: 700 }).catch(() => '') || '').toLowerCase();
     const fieldContext = await field.evaluate((el) => {
       const parts = [];
       for (const label of [...(el.labels || [])]) if (label.innerText) parts.push(label.innerText);
@@ -1201,12 +1236,14 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
     if (type === 'file') {
       const hint = `${await field.getAttribute('name', { timeout: 1200 }).catch(() => '') || ''} ${await field.getAttribute('id', { timeout: 1200 }).catch(() => '') || ''} ${await field.getAttribute('aria-label', { timeout: 1200 }).catch(() => '') || ''} ${await field.getAttribute('accept', { timeout: 1200 }).catch(() => '') || ''}`.toLowerCase();
       if (/resume|cv|curriculum|attachment|pdf/.test(hint)) {
-        await field.setInputFiles(cvPath).catch(() => {});
-        if (required && !await field.evaluate((el) => el.files?.length > 0).catch(() => false)) missing.push(hint || 'CV adjunto');
+        const uploaded = await field.setInputFiles(cvPath, { timeout: 5000 }).then(() => true).catch(() => false);
+        if (uploaded) await new Promise((resolve) => setTimeout(resolve, 450));
+        if (required && !uploaded) missing.push(hint || 'CV adjunto');
       } else if (required) missing.push(hint || 'archivo obligatorio');
+      i += 1;
       continue;
     }
-    if (!await field.isVisible().catch(() => false)) continue;
+    if (!await field.isVisible().catch(() => false)) { i += 1; continue; }
     if (['checkbox', 'radio'].includes(type)) {
       const metadata = await field.evaluate((el) => ({
         option: el.labels ? [...el.labels].map((item) => item.innerText).join(' ').trim() : el.getAttribute('aria-label') || el.value || 'confirmación legal',
@@ -1221,6 +1258,7 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
       if ((type === 'radio' ? selectedRadios : selectedCheckboxes).has(normalizeAnswer(option)) || automaticRadio) {
         await field.check({ timeout: 1500 }).catch(() => {});
       }
+      i += 1;
       continue;
     }
     const label = `${fieldContext} ${await field.evaluate((el) => [el.closest('.application-question,fieldset,[role="group"]')?.innerText || '', el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || '', el.getAttribute('name') || '', el.id || ''].join(' ')).catch(() => '')}`;
@@ -1240,7 +1278,13 @@ async function fillKnownFields(form, p, cvPath, job = {}) {
     }
     const current = await field.inputValue().catch(() => '');
     if (required && !current) missing.push(label.trim() || `campo ${i + 1}`);
+    i += 1;
   }
+  const invalidRequired = await form.locator(':invalid:visible').evaluateAll((nodes) => nodes.map((el) => {
+    const labels = [...(el.labels || [])].map((label) => label.innerText).filter(Boolean);
+    return labels[0] || el.getAttribute('aria-label') || el.name || el.id || 'campo obligatorio';
+  })).catch(() => []);
+  missing.push(...invalidRequired);
   for (const [groupName, group] of radioGroups) {
     const isSelected = await form.locator('input[type="radio"]:checked').evaluateAll((nodes, name) => nodes.some((node) => node.name === name), groupName).catch(() => false);
     if (group.required && !isSelected) missing.push(group.label);
